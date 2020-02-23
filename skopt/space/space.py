@@ -18,6 +18,11 @@ from .transformers import LogN
 from .transformers import Pipeline
 
 
+import ConfigSpace as CS
+import itertools
+from random import sample
+
+
 # helper class to be able to print [1, ..., 4] instead of [1, '...', 4]
 class _Ellipsis:
     def __repr__(self):
@@ -721,7 +726,37 @@ class Space(object):
             dimensions.
     """
     def __init__(self, dimensions):
+        self.is_config_space = False
+        if isinstance(dimensions, CS.ConfigurationSpace):
+            self.is_config_space = True
+            self.config_space = dimensions
+            hps = self.config_space.get_hyperparameters()
+            cond_hps = self.config_space.get_all_conditional_hyperparameters()
+            space = []
+            for x in hps:
+                if isinstance(x, CS.hyperparameters.CategoricalHyperparameter):
+                    vals = list(x.choices)
+                    if x.name in cond_hps:
+                        vals.append('NA')
+                    param =  Categorical(vals, name=x.name)
+                    space.append(param)
+                elif isinstance(x, CS.hyperparameters.OrdinalHyperparameter):
+                    vals = list(x.sequence)
+                    if x.name in cond_hps:
+                        vals.append('NA')
+                    param =  Categorical(vals, name=x.name)
+                    space.append(param)
+                elif isinstance(x, CS.hyperparameters.IntegerHyperparameter):
+                    print('IntegerHyperparameter; not added')
+                elif isinstance(x, CS.hyperparameters.RealHyperparameter):
+                    print('RealHyperparameter; not added')
+                else:
+                    print('unknown type')
+            #print(space)
+            dimensions = space
+        
         self.dimensions = [check_dimension(dim) for dim in dimensions]
+        #print(self.dimensions)
 
     def __eq__(self, other):
         return all([a == b for a, b in zip(self.dimensions, other.dimensions)])
@@ -828,9 +863,37 @@ class Space(object):
         """
         rng = check_random_state(random_state)
 
+        if self.is_config_space:
+            confs = self.config_space.sample_configuration(1000)
+            #print(confs)
+            hps_names = self.config_space.get_hyperparameter_names()
+            points = []
+            for conf in confs:
+                point = []
+                for hps_name in hps_names:
+                    val = 'NA'
+                    if hps_name in conf.keys():
+                        val = conf[hps_name]
+                    point.append(val)
+                points.append(point)
+
+            # config space wont give unique set of points; find unique
+            points.sort()
+            unique_points = list(points for points,_ in itertools.groupby(points))
+            
+            #print(len(points))
+            #print(len(unique_points))
+
+            #num_samples = 3
+            req_points = sample(unique_points,min(len(unique_points),n_samples))
+
+            #for point in req_points:
+            #    print(point)
+
+            return req_points
+
         # Draw
         columns = []
-
         for dim in self.dimensions:
             if sp_version < (0, 16):
                 columns.append(dim.rvs(n_samples=n_samples))
@@ -839,7 +902,6 @@ class Space(object):
 
         # Transpose
         rows = []
-
         for i in range(n_samples):
             r = []
             for j in range(self.n_dims):
