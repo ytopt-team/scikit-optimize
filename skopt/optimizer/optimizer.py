@@ -162,7 +162,7 @@ class Optimizer(object):
                  acq_optimizer_kwargs=None):
 
         self.rng = check_random_state(random_state)
-
+        self.converged = False
         # Configure acquisition function
 
         # Store and creat acquisition function set
@@ -433,11 +433,12 @@ class Optimizer(object):
                                    "model has been fit.")
 
             next_x = self._next_x
-            min_delta_x = min([self.space.distance(next_x, xi)
-                               for xi in self.Xi])
-            if abs(min_delta_x) <= 1e-8:
-                warnings.warn("The objective has been evaluated "
-                              "at this point before.")
+            if next_x is not None:
+                min_delta_x = min([self.space.distance(next_x, xi)
+                                for xi in self.Xi])
+                if abs(min_delta_x) <= 1e-8:
+                    warnings.warn("The objective has been evaluated "
+                                "at this point before.")
 
             # return point computed from last call to tell()
             return next_x
@@ -539,63 +540,72 @@ class Optimizer(object):
 
             # even with BFGS as optimizer we want to sample a large number
             # of points and then pick the best ones as starting points
-            X = self.space.transform(self.space.rvs(
-                n_samples=self.n_points, random_state=self.rng))
+            X_s = self.space.rvs(n_samples=self.n_points, Xi=self.Xi, random_state=self.rng)
+            
+            print('Sampled space:')
+            print(len(X_s))
 
-            self.next_xs_ = []
-            for cand_acq_func in self.cand_acq_funcs_:
-                values = _gaussian_acquisition(
-                    X=X, model=est, y_opt=np.min(self.yi),
-                    acq_func=cand_acq_func,
-                    acq_func_kwargs=self.acq_func_kwargs)
-                # Find the minimum of the acquisition function by randomly
-                # sampling points from the space
-                if self.acq_optimizer == "sampling":
-                    next_x = X[np.argmin(values)]
+            if len(X_s) > 0:
+                X = self.space.transform(X_s)
+                self.next_xs_ = []
+                for cand_acq_func in self.cand_acq_funcs_:
+                    values = _gaussian_acquisition(
+                        X=X, model=est, y_opt=np.min(self.yi),
+                        acq_func=cand_acq_func,
+                        acq_func_kwargs=self.acq_func_kwargs)
+                    # Find the minimum of the acquisition function by randomly
+                    # sampling points from the space
+                    if self.acq_optimizer == "sampling":
+                        next_x = X[np.argmin(values)]
 
-                # Use BFGS to find the mimimum of the acquisition function, the
-                # minimization starts from `n_restarts_optimizer` different
-                # points and the best minimum is used
-                elif self.acq_optimizer == "lbfgs":
-                    x0 = X[np.argsort(values)[:self.n_restarts_optimizer]]
+                    # Use BFGS to find the mimimum of the acquisition function, the
+                    # minimization starts from `n_restarts_optimizer` different
+                    # points and the best minimum is used
+                    elif self.acq_optimizer == "lbfgs":
+                        x0 = X[np.argsort(values)[:self.n_restarts_optimizer]]
 
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("ignore")
-                        results = Parallel(n_jobs=self.n_jobs)(
-                            delayed(fmin_l_bfgs_b)(
-                                gaussian_acquisition_1D, x,
-                                args=(est, np.min(self.yi), cand_acq_func,
-                                      self.acq_func_kwargs),
-                                bounds=self.space.transformed_bounds,
-                                approx_grad=False,
-                                maxiter=20)
-                            for x in x0)
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            results = Parallel(n_jobs=self.n_jobs)(
+                                delayed(fmin_l_bfgs_b)(
+                                    gaussian_acquisition_1D, x,
+                                    args=(est, np.min(self.yi), cand_acq_func,
+                                        self.acq_func_kwargs),
+                                    bounds=self.space.transformed_bounds,
+                                    approx_grad=False,
+                                    maxiter=20)
+                                for x in x0)
 
-                    cand_xs = np.array([r[0] for r in results])
-                    cand_acqs = np.array([r[1] for r in results])
-                    next_x = cand_xs[np.argmin(cand_acqs)]
+                        cand_xs = np.array([r[0] for r in results])
+                        cand_acqs = np.array([r[1] for r in results])
+                        next_x = cand_xs[np.argmin(cand_acqs)]
 
-                # lbfgs should handle this but just in case there are
-                # precision errors.
-                if not self.space.is_categorical:
-                    next_x = np.clip(
-                        next_x, transformed_bounds[:, 0],
-                        transformed_bounds[:, 1])
-                self.next_xs_.append(next_x)
+                    # lbfgs should handle this but just in case there are
+                    # precision errors.
+                    if not self.space.is_categorical:
+                        next_x = np.clip(
+                            next_x, transformed_bounds[:, 0],
+                            transformed_bounds[:, 1])
+                    self.next_xs_.append(next_x)
 
-            if self.acq_func == "gp_hedge":
-                logits = np.array(self.gains_)
-                logits -= np.max(logits)
-                exp_logits = np.exp(self.eta * logits)
-                probs = exp_logits / np.sum(exp_logits)
-                next_x = self.next_xs_[np.argmax(self.rng.multinomial(1,
-                                                                      probs))]
+                if self.acq_func == "gp_hedge":
+                    logits = np.array(self.gains_)
+                    logits -= np.max(logits)
+                    exp_logits = np.exp(self.eta * logits)
+                    probs = exp_logits / np.sum(exp_logits)
+                    next_x = self.next_xs_[np.argmax(self.rng.multinomial(1,
+                                                                        probs))]
+                else:
+                    next_x = self.next_xs_[0]
+
+                # note the need for [0] at the end
+                self._next_x = self.space.inverse_transform(
+                    next_x.reshape((1, -1)))[0]
             else:
-                next_x = self.next_xs_[0]
-
-            # note the need for [0] at the end
-            self._next_x = self.space.inverse_transform(
-                next_x.reshape((1, -1)))[0]
+                print(self.converged)
+                self.converged = True
+                warnings.warn("Search space exhausted and no new points available.")
+                sys.exit(0)
 
         # Pack results
         return create_result(self.Xi, self.yi, self.space, self.rng,
