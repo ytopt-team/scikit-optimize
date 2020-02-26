@@ -542,8 +542,8 @@ class Optimizer(object):
             # of points and then pick the best ones as starting points
             X_s = self.space.rvs(n_samples=self.n_points, Xi=self.Xi, random_state=self.rng)
             
-            print('Sampled space:')
-            print(len(X_s))
+            #print('Sampled space:')
+            #print(len(X_s))
 
             if len(X_s) > 0:
                 X = self.space.transform(X_s)
@@ -602,7 +602,6 @@ class Optimizer(object):
                 self._next_x = self.space.inverse_transform(
                     next_x.reshape((1, -1)))[0]
             else:
-                print(self.converged)
                 self.converged = True
                 warnings.warn("Search space exhausted and no new points available.")
                 sys.exit(0)

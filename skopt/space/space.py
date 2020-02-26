@@ -845,100 +845,6 @@ class Space(object):
 
         return space
 
-    def rvs_old(self, n_samples=1, Xi=None, random_state=None):
-        """Draw random samples.
-
-        The samples are in the original space. They need to be transformed
-        before being passed to a model or minimizer by `space.transform()`.
-
-        Parameters
-        ----------
-        n_samples : int, default=1
-            Number of samples to be drawn from the space.
-
-        random_state : int, RandomState instance, or None (default)
-            Set random state to something other than None for reproducible
-            results.
-
-        Returns
-        -------
-        points : list of lists, shape=(n_points, n_dims)
-           Points sampled from the space.
-        """
-        rng = check_random_state(random_state)
-
-        req_points = []
-        if self.is_config_space:
-
-            if self.config_space_explored:
-                print('finished exploring the space; exiting search')
-                sys.exit(0)
-
-            if self.config_space_samples is not None:
-                req_n_samples = n_samples
-                if n_samples > len(self.config_space_samples):
-                    req_n_samples = len(self.config_space_samples)
-                    self.config_space_explored = True
-                for i in range(req_n_samples):
-                    req_points.append(self.config_space_samples.pop(0))
-                return req_points
-
-            confs = self.config_space.sample_configuration(1000)
-            hps_names = self.config_space.get_hyperparameter_names()
-            points = []
-            for conf in confs:
-                point = []
-                for hps_name in hps_names:
-                    val = 'NA'
-                    if hps_name in conf.keys():
-                        val = conf[hps_name]
-                    point.append(val)
-                points.append(point)
-
-            # config space sampler wont give unique set of points; find unique
-            points.sort()
-            unique_points = list(points for points,_ in itertools.groupby(points))
-
-            if self.config_space_samples is None:
-                #if the number of unique points is less than 10% store it
-                percent_points = (100.0*len(unique_points)) / (1.0 * len(points))
-                print(len(unique_points))
-                print(len(points))
-                print(n_samples)
-                if (percent_points < 10.0):
-                    self.config_space_samples = unique_points
-                    req_n_samples = n_samples
-                    if n_samples > len(self.config_space_samples):
-                        print(len(self.config_space_samples))
-                        req_n_samples = len(self.config_space_samples)
-                        self.config_space_explored = True
-                    for i in range(req_n_samples):
-                        req_points.append(self.config_space_samples.pop(0))
-                    return req_points
-
-            req_points = sample(unique_points,min(len(unique_points),n_samples))
-
-            return req_points
-
-        # Draw
-        columns = []
-        for dim in self.dimensions:
-            if sp_version < (0, 16):
-                columns.append(dim.rvs(n_samples=n_samples))
-            else:
-                columns.append(dim.rvs(n_samples=n_samples, random_state=rng))
-
-        # Transpose
-        rows = []
-        for i in range(n_samples):
-            r = []
-            for j in range(self.n_dims):
-                r.append(columns[j][i])
-
-            rows.append(r)
-
-        return rows
-
     def rvs(self, n_samples=1, Xi=None, random_state=None):
         """Draw random samples.
 
@@ -960,10 +866,6 @@ class Space(object):
            Points sampled from the space.
         """
         rng = check_random_state(random_state)
-
-        print('1. Evaluated points:')
-        print(Xi)
-
         req_points = []
         if self.is_config_space:
             confs = self.config_space.sample_configuration(1000)
@@ -988,8 +890,8 @@ class Space(object):
                 for i in range(len(Xi)):
                     key = '-'.join(Xi[i])
                     value = Xi[i]
-                    print(key)
-                    print(value)
+                    #print(key)
+                    #print(value)
                     Xi_dict[key] = value
                 for i in range(len(unique_points)):
                     key = '-'.join(unique_points[i])
@@ -999,8 +901,6 @@ class Space(object):
                     if key in unique_points_dict.keys():
                         del unique_points_dict[key]
                 req_points = list(unique_points_dict.values())
-                print('2. length:')
-                print(len(req_points))
             else:
                 req_points = unique_points 
 
