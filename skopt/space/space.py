@@ -730,12 +730,14 @@ class Space(object):
         self.is_config_space = False
         self.config_space_samples = None
         self.config_space_explored = False
+        self.hps_names = None
 
         if isinstance(dimensions, CS.ConfigurationSpace):
             self.is_config_space = True
             self.config_space = dimensions
             hps = self.config_space.get_hyperparameters()
             cond_hps = self.config_space.get_all_conditional_hyperparameters()
+            self.hps_names = self.config_space.get_hyperparameter_names()
             space = []
             for x in hps:
                 if isinstance(x, CS.hyperparameters.CategoricalHyperparameter):
@@ -869,11 +871,11 @@ class Space(object):
         req_points = []
         if self.is_config_space:
             confs = self.config_space.sample_configuration(1000)
-            hps_names = self.config_space.get_hyperparameter_names()
+            #self.hps_names = self.config_space.get_hyperparameter_names()
             points = []
             for conf in confs:
                 point = []
-                for hps_name in hps_names:
+                for hps_name in self.hps_names:
                     val = 'NA'
                     if hps_name in conf.keys():
                         val = conf[hps_name]
