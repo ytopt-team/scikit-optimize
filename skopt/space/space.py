@@ -883,7 +883,7 @@ class Space(object):
                 points.append(point)
 
             # config space sampler wont give unique set of points; find unique
-            points.sort()
+            # points.sort()
             unique_points = list(points for points,_ in itertools.groupby(points))
 
             if Xi is not None:
