@@ -326,7 +326,7 @@ class Real(Dimension):
         inv_transform = super(Real, self).inverse_transform(Xt)
         if isinstance(inv_transform, list):
             inv_transform = np.array(inv_transform)
-        
+
         # PB commenting clip
         #print(inv_transform)
         #inv_transform = np.clip(inv_transform, self.low, self.high).astype(self.dtype)
@@ -344,7 +344,7 @@ class Real(Dimension):
     def __contains__(self, point):
         if isinstance(point, list):
             point = np.array(point)
-        if point == np.nan: 
+        if point == np.nan:
             return True
         else:
             return self.low <= point <= self.high
@@ -527,7 +527,7 @@ class Integer(Dimension):
     def __contains__(self, point):
         if isinstance(point, list):
             point = np.array(point)
-        if point == np.nan: 
+        if point == np.nan:
             return True
         else:
             return self.low <= point <= self.high
@@ -754,10 +754,10 @@ class Space(object):
             self.is_config_space = True
             self.config_space = dimensions
             self.hps_type = {}
- 
+
             hps = self.config_space.get_hyperparameters()
             cond_hps = self.config_space.get_all_conditional_hyperparameters()
-            
+
             space = []
             for x in hps:
                 self.hps_names.append(x.name)
@@ -779,7 +779,7 @@ class Space(object):
                     prior = 'uniform'
                     if x.log:
                         prior = 'log-uniform'
-                    param = Integer(x.lower,x.upper,prior=prior,name=x.name) 
+                    param = Integer(x.lower,x.upper,prior=prior,name=x.name)
                     space.append(param)
                     self.hps_type[x.name] = 'Integer'
                 elif isinstance(x, CS.hyperparameters.NormalIntegerHyperparameter):
@@ -943,7 +943,7 @@ class Space(object):
                 req_points = unique_points
 
             if len(req_points) > 0:
-                sel_req_points = random.choices(req_points, k = min(len(req_points),n_samples)) 
+                sel_req_points = random.choices(req_points, k = min(len(req_points),n_samples))
                 return sel_req_points
             else:
                 return []
