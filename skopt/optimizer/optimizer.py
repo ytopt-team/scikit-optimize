@@ -434,11 +434,12 @@ class Optimizer(object):
 
             next_x = self._next_x
             if next_x is not None:
-                min_delta_x = min([self.space.distance(next_x, xi)
-                                for xi in self.Xi])
-                if abs(min_delta_x) <= 1e-8:
-                    warnings.warn("The objective has been evaluated "
-                                "at this point before.")
+                if not self.space.is_config_space:
+                    min_delta_x = min([self.space.distance(next_x, xi)
+                                    for xi in self.Xi])
+                    if abs(min_delta_x) <= 1e-8:
+                        warnings.warn("The objective has been evaluated "
+                                    "at this point before.")
 
             # return point computed from last call to tell()
             return next_x
@@ -470,7 +471,12 @@ class Optimizer(object):
             only be fitted after `n_initial_points` points have been told to
             the optimizer irrespective of the value of `fit`.
         """
-        check_x_in_space(x, self.space)
+        
+        if self.space.is_config_space:
+            pass
+        else:
+            check_x_in_space(x, self.space)
+        
         self._check_y_is_valid(x, y)
 
         # take the logarithm of the computation times
@@ -524,7 +530,16 @@ class Optimizer(object):
 
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                est.fit(self.space.transform(self.Xi), self.yi)
+                #print('+++++++++++++++++++++++')
+                #for p in self.space.transform(self.Xi):
+                #    print(p)
+                #print(self.Xi)
+                Xtt = self.space.imp_const.fit_transform(self.space.transform(self.Xi))
+                #for p in Xtt:
+                #    print(p)
+                #print('+++++++++++++++++++++++')
+                #est.fit(self.space.transform(self.Xi), self.yi)
+                est.fit(Xtt, self.yi)
 
             if hasattr(self, "next_xs_") and self.acq_func == "gp_hedge":
                 self.gains_ -= est.predict(np.vstack(self.next_xs_))
@@ -541,12 +556,14 @@ class Optimizer(object):
             # even with BFGS as optimizer we want to sample a large number
             # of points and then pick the best ones as starting points
             X_s = self.space.rvs(n_samples=self.n_points, Xi=self.Xi, random_state=self.rng)
+
             
             #print('Sampled space:')
-            #print(len(X_s))
+            #print(X_s)
 
             if len(X_s) > 0:
-                X = self.space.transform(X_s)
+                X = self.space.imp_const.fit_transform(self.space.transform(X_s))
+                #print(X)
                 self.next_xs_ = []
                 for cand_acq_func in self.cand_acq_funcs_:
                     values = _gaussian_acquisition(
@@ -583,9 +600,10 @@ class Optimizer(object):
                     # lbfgs should handle this but just in case there are
                     # precision errors.
                     if not self.space.is_categorical:
-                        next_x = np.clip(
-                            next_x, transformed_bounds[:, 0],
-                            transformed_bounds[:, 1])
+                        if not self.space.is_config_space:
+                            next_x = np.clip(
+                                next_x, transformed_bounds[:, 0],
+                                transformed_bounds[:, 1])
                     self.next_xs_.append(next_x)
 
                 if self.acq_func == "gp_hedge":

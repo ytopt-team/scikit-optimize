@@ -2,6 +2,7 @@ import numbers
 import numpy as np
 import yaml
 import sys
+import random
 
 from scipy.stats.distributions import randint
 from scipy.stats.distributions import rv_discrete
@@ -22,6 +23,9 @@ from .transformers import Pipeline
 import ConfigSpace as CS
 import itertools
 from random import sample
+
+from sklearn.impute import SimpleImputer
+
 
 
 # helper class to be able to print [1, ..., 4] instead of [1, '...', 4]
@@ -319,12 +323,14 @@ class Real(Dimension):
         """Inverse transform samples from the warped space back into the
            original space.
         """
-
         inv_transform = super(Real, self).inverse_transform(Xt)
         if isinstance(inv_transform, list):
             inv_transform = np.array(inv_transform)
-        inv_transform = np.clip(inv_transform,
-                                self.low, self.high).astype(self.dtype)
+        
+        # PB commenting clip
+        #print(inv_transform)
+        #inv_transform = np.clip(inv_transform, self.low, self.high).astype(self.dtype)
+
         if self.dtype == float or self.dtype == 'float':
             # necessary, otherwise the type is converted to a numpy type
             return getattr(inv_transform, "tolist", lambda: value)()
@@ -338,7 +344,10 @@ class Real(Dimension):
     def __contains__(self, point):
         if isinstance(point, list):
             point = np.array(point)
-        return self.low <= point <= self.high
+        if point == np.nan: 
+            return True
+        else:
+            return self.low <= point <= self.high
 
     @property
     def transformed_bounds(self):
@@ -499,6 +508,11 @@ class Integer(Dimension):
         inv_transform = super(Integer, self).inverse_transform(Xt)
         if isinstance(inv_transform, list):
             inv_transform = np.array(inv_transform)
+
+        # PB nan is a float cannot be converted to int
+        if np.isnan(inv_transform):
+            return np.round(inv_transform)
+
         if self.dtype == int or self.dtype == 'int':
             # necessary, otherwise the type is converted to a numpy type
             return getattr(np.round(inv_transform).astype(self.dtype),
@@ -513,7 +527,10 @@ class Integer(Dimension):
     def __contains__(self, point):
         if isinstance(point, list):
             point = np.array(point)
-        return self.low <= point <= self.high
+        if point == np.nan: 
+            return True
+        else:
+            return self.low <= point <= self.high
 
     @property
     def transformed_bounds(self):
@@ -537,7 +554,6 @@ class Integer(Dimension):
             raise RuntimeError("Can only compute distance for values within "
                                "the space, not %s and %s." % (a, b))
         return abs(a - b)
-
 
 class Categorical(Dimension):
     """Search space dimension that can take on categorical values.
@@ -730,39 +746,57 @@ class Space(object):
         self.is_config_space = False
         self.config_space_samples = None
         self.config_space_explored = False
-        self.hps_names = None
+        self.imp_const = SimpleImputer(missing_values=np.nan, strategy='constant', fill_value = -1000)
+        self.imp_const_inv = SimpleImputer(missing_values=-1000, strategy='constant', fill_value = np.nan)
+        self.hps_names = []
 
         if isinstance(dimensions, CS.ConfigurationSpace):
             self.is_config_space = True
             self.config_space = dimensions
+            self.hps_type = {}
+ 
             hps = self.config_space.get_hyperparameters()
             cond_hps = self.config_space.get_all_conditional_hyperparameters()
-            self.hps_names = self.config_space.get_hyperparameter_names()
+            
             space = []
             for x in hps:
+                self.hps_names.append(x.name)
                 if isinstance(x, CS.hyperparameters.CategoricalHyperparameter):
                     vals = list(x.choices)
                     if x.name in cond_hps:
                         vals.append('NA')
-                    param =  Categorical(vals, name=x.name)
+                    param =  Categorical(vals, prior=x.probabilities, name=x.name)
                     space.append(param)
+                    self.hps_type[x.name] = 'Categorical'
                 elif isinstance(x, CS.hyperparameters.OrdinalHyperparameter):
                     vals = list(x.sequence)
                     if x.name in cond_hps:
                         vals.append('NA')
-                    param =  Categorical(vals, name=x.name)
+                    param = Categorical(vals, name=x.name)
                     space.append(param)
-                elif isinstance(x, CS.hyperparameters.IntegerHyperparameter):
-                    print('IntegerHyperparameter; not added')
-                elif isinstance(x, CS.hyperparameters.RealHyperparameter):
-                    print('RealHyperparameter; not added')
+                    self.hps_type[x.name] = 'Categorical'
+                elif isinstance(x, CS.hyperparameters.UniformIntegerHyperparameter):
+                    prior = 'uniform'
+                    if x.log:
+                        prior = 'log-uniform'
+                    param = Integer(x.lower,x.upper,prior=prior,name=x.name) 
+                    space.append(param)
+                    self.hps_type[x.name] = 'Integer'
+                elif isinstance(x, CS.hyperparameters.NormalIntegerHyperparameter):
+                    raise ValueError("NormalIntegerHyperparameter not implemented")
+                elif isinstance(x, CS.hyperparameters.UniformFloatHyperparameter):
+                    prior = 'uniform'
+                    if x.log:
+                        prior = 'log-uniform'
+                    param = Real(x.lower,x.upper,prior=prior,name=x.name)
+                    space.append(param)
+                    self.hps_type[x.name] = 'Real'
+                elif isinstance(x, CS.hyperparameters.NormalFloatHyperparameter):
+                    raise ValueError("NormalFloatHyperparameter not implemented")
                 else:
-                    print('unknown type')
-            #print(space)
+                    raise ValueError("Unknown Hyperparameter type")
             dimensions = space
-        
         self.dimensions = [check_dimension(dim) for dim in dimensions]
-        #print(self.dimensions)
 
     def __eq__(self, other):
         return all([a == b for a, b in zip(self.dimensions, other.dimensions)])
@@ -871,32 +905,34 @@ class Space(object):
         req_points = []
         if self.is_config_space:
             confs = self.config_space.sample_configuration(1000)
-            #self.hps_names = self.config_space.get_hyperparameter_names()
+            hps_names = self.config_space.get_hyperparameter_names()
             points = []
             for conf in confs:
+                #print(conf)
                 point = []
-                for hps_name in self.hps_names:
-                    val = 'NA'
+                for hps_name in hps_names:
+                    val = np.nan
+                    if self.hps_type[hps_name] == 'Categorical':
+                        val = 'NA'
                     if hps_name in conf.keys():
                         val = conf[hps_name]
                     point.append(val)
                 points.append(point)
 
             # config space sampler wont give unique set of points; find unique
-            # points.sort()
+            points.sort()
             unique_points = list(points for points,_ in itertools.groupby(points))
+            random.shuffle(unique_points)
 
             if Xi is not None:
                 Xi_dict = {}
                 unique_points_dict = {}
                 for i in range(len(Xi)):
-                    key = '-'.join(Xi[i])
+                    key = '-'.join(str(Xi[i]))
                     value = Xi[i]
-                    #print(key)
-                    #print(value)
                     Xi_dict[key] = value
                 for i in range(len(unique_points)):
-                    key = '-'.join(unique_points[i])
+                    key = '-'.join(str(unique_points[i]))
                     value = unique_points[i]
                     unique_points_dict[key] = value
                 for key in Xi_dict.keys():
@@ -904,29 +940,32 @@ class Space(object):
                         del unique_points_dict[key]
                 req_points = list(unique_points_dict.values())
             else:
-                req_points = unique_points 
+                req_points = unique_points
 
-            return req_points
-
-        # Draw
-        columns = []
-        for dim in self.dimensions:
-            if sp_version < (0, 16):
-                columns.append(dim.rvs(n_samples=n_samples))
+            if len(req_points) > 0:
+                sel_req_points = random.choices(req_points, k = min(len(req_points),n_samples)) 
+                return sel_req_points
             else:
-                columns.append(dim.rvs(n_samples=n_samples, random_state=rng))
+                return []
+        else:
+            # Draw
+            columns = []
+            for dim in self.dimensions:
+                if sp_version < (0, 16):
+                    columns.append(dim.rvs(n_samples=n_samples))
+                else:
+                    columns.append(dim.rvs(n_samples=n_samples, random_state=rng))
 
-        # Transpose
-        rows = []
-        for i in range(n_samples):
-            r = []
-            for j in range(self.n_dims):
-                r.append(columns[j][i])
+            # Transpose
+            rows = []
+            for i in range(n_samples):
+                r = []
+                for j in range(self.n_dims):
+                    r.append(columns[j][i])
 
-            rows.append(r)
+                rows.append(r)
 
-        return rows
-
+            return rows
 
     def set_transformer(self, transform):
         """Sets the transformer of all dimension objects to `transform`
@@ -1000,6 +1039,14 @@ class Space(object):
         # Repack as an array
         Xt = np.hstack([np.asarray(c).reshape((len(X), -1)) for c in columns])
 
+        if False and self.is_config_space:
+            self.imp_const.fit(Xt)
+            Xtt = self.imp_const.transform(Xt)
+            Xt = Xtt
+
+        #for p in Xt:
+        #    print(p)
+
         return Xt
 
     def inverse_transform(self, Xt):
@@ -1016,6 +1063,13 @@ class Space(object):
         X : list of lists, shape=(n_samples, n_dims)
             The original samples.
         """
+
+        #print('inverse:')
+        #print(Xt)
+        Xt = self.imp_const_inv.fit_transform(Xt)
+        #print(Xtt)
+        #Xt = Xtt
+
         # Inverse transform
         columns = []
         start = 0
@@ -1042,6 +1096,7 @@ class Space(object):
 
             rows.append(r)
 
+        #print(rows)
         return rows
 
     @property

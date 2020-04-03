@@ -192,6 +192,7 @@ def check_x_in_space(x, space):
             raise ValueError("Not all points have the same dimensions as"
                              " the space.")
     elif is_listlike(x):
+        print(x)
         if x not in space:
             raise ValueError("Point (%s) is not within the bounds of"
                              " the space (%s)."
