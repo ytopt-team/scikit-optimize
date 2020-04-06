@@ -908,7 +908,6 @@ class Space(object):
             hps_names = self.config_space.get_hyperparameter_names()
             points = []
             for conf in confs:
-                #print(conf)
                 point = []
                 for hps_name in hps_names:
                     val = np.nan
@@ -924,7 +923,7 @@ class Space(object):
             unique_points = list(points for points,_ in itertools.groupby(points))
             random.shuffle(unique_points)
 
-            if Xi is not None:
+            if Xi is not None: # Computing unique points
                 Xi_dict = {}
                 unique_points_dict = {}
                 for i in range(len(Xi)):

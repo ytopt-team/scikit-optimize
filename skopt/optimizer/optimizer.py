@@ -27,6 +27,13 @@ from ..utils import is_2Dlistlike
 from ..utils import normalize_dimensions
 from ..utils import cook_initial_point_generator
 
+class ExhaustedSearchSpace(RuntimeError):
+    """"Raised when the search cannot sample new points from the ConfigSpace.
+    """
+
+    def __str__(self):
+        return f'The search space is exhausted and the search cannot sample new points!'
+
 
 class Optimizer(object):
     """Run bayesian optimisation loop.
@@ -471,12 +478,12 @@ class Optimizer(object):
             only be fitted after `n_initial_points` points have been told to
             the optimizer irrespective of the value of `fit`.
         """
-        
+
         if self.space.is_config_space:
             pass
         else:
             check_x_in_space(x, self.space)
-        
+
         self._check_y_is_valid(x, y)
 
         # take the logarithm of the computation times
@@ -557,13 +564,10 @@ class Optimizer(object):
             # of points and then pick the best ones as starting points
             X_s = self.space.rvs(n_samples=self.n_points, Xi=self.Xi, random_state=self.rng)
 
-            
-            #print('Sampled space:')
-            #print(X_s)
 
-            if len(X_s) > 0:
+
+            if len(X_s) > 0: # verify if new points are sampled
                 X = self.space.imp_const.fit_transform(self.space.transform(X_s))
-                #print(X)
                 self.next_xs_ = []
                 for cand_acq_func in self.cand_acq_funcs_:
                     values = _gaussian_acquisition(
@@ -621,8 +625,7 @@ class Optimizer(object):
                     next_x.reshape((1, -1)))[0]
             else:
                 self.converged = True
-                warnings.warn("Search space exhausted and no new points available.")
-                sys.exit(0)
+                raise ExhaustedSearchSpace()
 
         # Pack results
         return create_result(self.Xi, self.yi, self.space, self.rng,
