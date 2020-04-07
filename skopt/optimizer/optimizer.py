@@ -263,6 +263,7 @@ class Optimizer(object):
         # normalize space if GP regressor
         if isinstance(self.base_estimator_, GaussianProcessRegressor):
             dimensions = normalize_dimensions(dimensions)
+        self.config_space = dimensions # save the config space to do a real copy of the Optimizer
         self.space = Space(dimensions)
 
         self._initial_samples = None
@@ -310,7 +311,7 @@ class Optimizer(object):
         """
 
         optimizer = Optimizer(
-            dimensions=self.space.dimensions,
+            dimensions=self.config_space, #self.space.dimensions,
             base_estimator=self.base_estimator_,
             n_initial_points=self.n_initial_points_,
             initial_point_generator=self._initial_point_generator,
@@ -537,15 +538,7 @@ class Optimizer(object):
 
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                #print('+++++++++++++++++++++++')
-                #for p in self.space.transform(self.Xi):
-                #    print(p)
-                #print(self.Xi)
                 Xtt = self.space.imp_const.fit_transform(self.space.transform(self.Xi))
-                #for p in Xtt:
-                #    print(p)
-                #print('+++++++++++++++++++++++')
-                #est.fit(self.space.transform(self.Xi), self.yi)
                 est.fit(Xtt, self.yi)
 
             if hasattr(self, "next_xs_") and self.acq_func == "gp_hedge":
@@ -563,8 +556,6 @@ class Optimizer(object):
             # even with BFGS as optimizer we want to sample a large number
             # of points and then pick the best ones as starting points
             X_s = self.space.rvs(n_samples=self.n_points, Xi=self.Xi, random_state=self.rng)
-
-
 
             if len(X_s) > 0: # verify if new points are sampled
                 X = self.space.imp_const.fit_transform(self.space.transform(X_s))

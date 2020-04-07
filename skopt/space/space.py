@@ -1043,9 +1043,6 @@ class Space(object):
             Xtt = self.imp_const.transform(Xt)
             Xt = Xtt
 
-        #for p in Xt:
-        #    print(p)
-
         return Xt
 
     def inverse_transform(self, Xt):
@@ -1063,11 +1060,7 @@ class Space(object):
             The original samples.
         """
 
-        #print('inverse:')
-        #print(Xt)
         Xt = self.imp_const_inv.fit_transform(Xt)
-        #print(Xtt)
-        #Xt = Xtt
 
         # Inverse transform
         columns = []
@@ -1095,7 +1088,6 @@ class Space(object):
 
             rows.append(r)
 
-        #print(rows)
         return rows
 
     @property
