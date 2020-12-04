@@ -12,7 +12,10 @@ from sklearn.utils import check_random_state
 from sklearn.utils.fixes import sp_version
 
 if type(sp_version) is not tuple:  # Version object since sklearn>=2.3.x
-    sp_version = sp_version.release
+    if hasattr(sp_version, "release"):
+        sp_version = sp_version.release
+    else:
+        sp_version = sp_version._version.release
 
 
 from .transformers import CategoricalEncoder
