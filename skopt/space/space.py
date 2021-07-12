@@ -30,6 +30,7 @@ from .transformers import ToInteger
 
 import ConfigSpace as CS
 from ConfigSpace.util import deactivate_inactive_hyperparameters
+import cconfigspace as CCS
 
 from sklearn.impute import SimpleImputer
 
@@ -896,8 +897,11 @@ class Space(object):
 
         # attributes used when a ConfigurationSpace from ConfigSpace is given
         self.is_config_space = False
+        self.is_ccs = False
         self.config_space_samples = None
+        self.ccs_samples = None
         self.config_space_explored = False
+        self.ccs_explored = False
 
         self.imp_const = SimpleImputer(
             missing_values=np.nan, strategy="constant", fill_value=-1000
@@ -969,6 +973,52 @@ class Space(object):
                     self.hps_type[x.name] = "Real"
                 else:
                     raise ValueError("Unknown Hyperparameter type.")
+            dimensions = space
+        elif isinstance(dimensions, CCS.ConfigurationSpace):
+            self.is_ccs = True
+            self.ccs = dimensions
+            self.hps_type = {}
+
+            hps = self.ccs.hyperparameters
+            cond_hps = [x.name for x in self.ccs.conditional_hyperparameters]
+
+            space = []
+            for x in hps:
+                self.hps_names.append(x.name)
+                distrib = self.ccs.get_hyperparameter_distribution(x)[0]
+                if (isinstance(x, CCS.CategoricalHyperparameter) or
+                        isinstance(x, CCS.OrdinalHyperparameter) or
+                        isinstance(x, CCS.DiscreteHyperparameter)):
+                    vals = list(x.values)
+                    if x.name in cond_hps:
+                        vals.append("NA")
+                    if isinstance(distrib, CCS.RouletteDistribution):
+                        param = Categorical(vals, prior=distrib.areas, name=x.name)
+                    elif sinstance(distrib, CCS.UniformDistribution):
+                        param = Categorical(vals, name=x.name)
+                    else:
+                        raise ValueError("Unsupported distribution")
+                    space.append(param)
+                    self.hps_type[x.name] = "Categorical"
+                elif isinstance(x, CCS.NumericalHyperparameter):
+                    prior = "uniform"
+                    lower = x.lower
+                    upper = x.upper
+                    t = x.data_type
+                    if isinstance(distrib, CCS.UniformDistribution):
+                        if distrib.scale_type == CCS.ccs_scale_type.LOGARITHMIC:
+                            prior = "log-uniform"
+                    else:
+                        raise ValueError("Unsupported distribution")
+                    if CCS.ccs_numeric_type.NUM_INTEGER:
+                        param = Integer(lower, upper, prior=prior, name=x.name)
+                        self.hps_type[x.name] = "Integer"
+                    else:
+                        param = Real(lower, upper, prior=prior, name=x.name)
+                        self.hps_type[x.name] = "Real"
+                    space.append(param)
+                else:
+                    raise ValueError("Unknown Hyperparameter type")
             dimensions = space
         self.dimensions = [check_dimension(dim) for dim in dimensions]
 
@@ -1149,6 +1199,23 @@ class Space(object):
                 req_points.append(point)
 
             return req_points
+        elif self.is_ccs:
+            confs = self.ccs.samples(n_samples)
+            hps = self.ccs.hyperparameters
+            points = []
+            for conf in confs:
+                point = []
+                for hp in hps:
+                    val = conf.value(hp)
+                    if ccs.ccs_inactive == val:
+                        if self.hps_type[hp.name] == "Categorical":
+                            val = "NA"
+                        else:
+                            val = np.nan
+                    point.append(val)
+                points.append(point)
+
+            return points
         else:
             if self.model_sdv is None:
                 # Draw
@@ -1240,7 +1307,7 @@ class Space(object):
         # Repack as an array
         Xt = np.hstack([np.asarray(c).reshape((len(X), -1)) for c in columns])
 
-        if False and self.is_config_space:
+        if False and (self.is_config_space or self.is_ccs):
             self.imp_const.fit(Xt)
             Xtt = self.imp_const.transform(Xt)
             Xt = Xtt
