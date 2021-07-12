@@ -4,6 +4,7 @@ from math import log
 from numbers import Number
 
 import ConfigSpace as CS
+import cconfigspace as CCS
 import numpy as np
 
 from scipy.optimize import fmin_l_bfgs_b
@@ -280,6 +281,11 @@ class Optimizer(object):
 
             if isinstance(self.base_estimator_, GaussianProcessRegressor):
                 raise RuntimeError("GP estimator is not available with ConfigSpace!")
+        elif type(dimensions) is CCS.ConfigurationSpace:
+            self.ccs = dimensions
+
+            if isinstance(self.base_estimator_, GaussianProcessRegressor):
+                raise RuntimeError("GP estimator is not available with CCS!")
         else:
 
             # normalize space if GP regressor
@@ -337,10 +343,16 @@ class Optimizer(object):
             Set the random state of the copy.
         """
 
+        dimens = None
+        if hasattr(self, "config_space"):
+            dimens = self.config_space
+        elif hasattr(self, "ccs"):
+            dimens = self.ccs
+        else:
+            dimens = self.space.dimensions
+
         optimizer = Optimizer(
-            dimensions=self.config_space
-            if hasattr(self, "config_space")
-            else self.space.dimensions,
+            dimensions=dimens,
             base_estimator=self.base_estimator_,
             n_initial_points=self.n_initial_points_,
             initial_point_generator=self._initial_point_generator,
@@ -472,7 +484,7 @@ class Optimizer(object):
 
             next_x = self._next_x
             if next_x is not None:
-                if not self.space.is_config_space:
+                if not self.space.is_config_space and not self.space.is_ccs:
                     min_delta_x = min([self.space.distance(next_x, xi) for xi in self.Xi])
                     if abs(min_delta_x) <= 1e-8:
                         warnings.warn(
@@ -511,6 +523,8 @@ class Optimizer(object):
         """
 
         if self.space.is_config_space:
+            pass
+        elif self.space.is_ccs:
             pass
         else:
             check_x_in_space(x, self.space)
@@ -638,7 +652,7 @@ class Optimizer(object):
                     # lbfgs should handle this but just in case there are
                     # precision errors.
                     if not self.space.is_categorical:
-                        if not self.space.is_config_space:
+                        if not self.space.is_config_space and not self.space.is_ccs:
                             next_x = np.clip(
                                 next_x, transformed_bounds[:, 0], transformed_bounds[:, 1]
                             )
