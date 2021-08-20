@@ -1008,6 +1008,10 @@ class Space(object):
                     if isinstance(distrib, CCS.UniformDistribution):
                         if distrib.scale_type == CCS.ccs_scale_type.LOGARITHMIC:
                             prior = "log-uniform"
+                    elif isinstance(distrib, CCS.NormalDistribution):
+                        prior = "normal"
+                        if distrib.scale_type == CCS.ccs_scale_type.LOGARITHMIC:
+                            raise ValueError("Unsupported 'log' transformation for CCS.NumericalHyperparameter with normal prior.")
                     else:
                         raise ValueError("Unsupported distribution")
                     if CCS.ccs_numeric_type.NUM_INTEGER:
