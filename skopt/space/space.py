@@ -994,7 +994,7 @@ class Space(object):
                         vals.append("NA")
                     if isinstance(distrib, CCS.RouletteDistribution):
                         param = Categorical(vals, prior=distrib.areas, name=x.name)
-                    elif sinstance(distrib, CCS.UniformDistribution):
+                    elif isinstance(distrib, CCS.UniformDistribution):
                         param = Categorical(vals, name=x.name)
                     else:
                         raise ValueError("Unsupported distribution")
@@ -1211,7 +1211,7 @@ class Space(object):
                 point = []
                 for hp in hps:
                     val = conf.value(hp)
-                    if ccs.ccs_inactive == val:
+                    if CCS.ccs_inactive == val:
                         if self.hps_type[hp.name] == "Categorical":
                             val = "NA"
                         else:
