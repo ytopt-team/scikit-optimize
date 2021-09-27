@@ -15,7 +15,6 @@
 # import os
 # import sys
 # sys.path.insert(0, os.path.abspath('.'))
-
 import warnings
 import os
 import re
@@ -28,13 +27,14 @@ sys.path.insert(0, os.path.abspath('sphinxext'))
 from github_link import make_linkcode_resolve
 import sphinx_gallery
 
+
 #  __version__ = pkg_resources.get_distribution('skopt').version
 on_rtd = os.environ.get('READTHEDOCS', None) == 'True'
 
 # -- Project information -----------------------------------------------------
 
 project = 'scikit-optimize'
-copyright = '2017 - 2020, The scikit-optimize contributors.'
+copyright = '2017 - 2020, scikit-optimize contributors (BSD License)'
 author = 'The scikit-optimize contributors'
 
 # The short X.Y version
@@ -308,7 +308,8 @@ sphinx_gallery_conf = {
 # thumbnails for the front page of the scikit-learn home page.
 # key: first image in set
 # values: (number of plot in set, height of thumbnail)
-carousel_thumbs = {'sphx_glr_plot_ask-and-tell_002.png': 600,
+carousel_thumbs = {'sphx_glr_sklearn-gridsearchcv-replacement_001.png': 600,
+                   'sphx_glr_plot_ask-and-tell_002.png': 600,
                    'sphx_glr_bayesian-optimization_004.png': 600,
                    'sphx_glr_strategy-comparison_002.png': 600,
                    'sphx_glr_visualizing-results_008.png': 600}

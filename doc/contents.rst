@@ -14,7 +14,9 @@ Table Of Contents
 .. toctree::
     :maxdepth: 2
 
+    preface
     getting_started
     user_guide
     auto_examples/index
     modules/classes
+    development

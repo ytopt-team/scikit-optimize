@@ -40,6 +40,22 @@ class _Ellipsis:
         return "..."
 
 
+def _transpose_list_array(x):
+    """Transposes a list matrix
+    """
+
+    n_dims = len(x)
+    assert n_dims > 0
+    n_samples = len(x[0])
+    rows = [None] * n_samples
+    for i in range(n_samples):
+        r = [None] * n_dims
+        for j in range(n_dims):
+            r[j] = x[j][i]
+        rows[i] = r
+    return rows
+
+
 def check_dimension(dimension, transform=None):
     """Turn a provided dimension description into a dimension object.
 
@@ -196,6 +212,10 @@ class Dimension(object):
         raise NotImplementedError
 
     @property
+    def is_constant(self):
+        raise NotImplementedError
+
+    @property
     def transformed_bounds(self):
         raise NotImplementedError
 
@@ -231,6 +251,7 @@ class Real(Dimension):
 
     prior : "uniform" or "log-uniform", default="uniform"
         Distribution to use when sampling random points for this dimension.
+
         - If `"uniform"`, points are sampled uniformly between the lower
           and upper bounds.
         - If `"log-uniform"`, points are sampled uniformly between
@@ -252,26 +273,19 @@ class Real(Dimension):
     name : str or None
         Name associated with the dimension, e.g., "learning rate".
 
-    dtype : str or dtype, default=np.float
+    dtype : str or dtype, default=float
         float type which will be used in inverse_transform,
         can be float.
-    """
 
-    def __init__(
-        self,
-        low,
-        high,
-        prior="uniform",
-        base=10,
-        transform=None,
-        name=None,
-        dtype=np.float,
-    ):
+    """
+    def __init__(self, low, high, prior="uniform", base=10, transform=None,
+                 name=None, dtype=float):
         if high <= low:
-            raise ValueError(
-                "the lower bound {} has to be less than the"
-                " upper bound {}".format(low, high)
-            )
+            raise ValueError("the lower bound {} has to be less than the"
+                             " upper bound {}".format(low, high))
+        if prior not in ["uniform", "log-uniform"]:
+            raise ValueError("prior should be 'uniform' or 'log-uniform'"
+                             " got {}".format(prior))
         self.low = low
         self.high = high
         self.prior = prior
@@ -282,31 +296,21 @@ class Real(Dimension):
         self._rvs = None
         self.transformer = None
         self.transform_ = transform
-        if isinstance(self.dtype, str) and self.dtype not in [
-            "float",
-            "float16",
-            "float32",
-            "float64",
-        ]:
-            raise ValueError(
-                "dtype must be 'float', 'float16', 'float32'"
-                "or 'float64'"
-                " got {}".format(self.dtype)
-            )
-        elif isinstance(self.dtype, type) and self.dtype not in [
-            float,
-            np.float,
-            np.float16,
-            np.float32,
-            np.float64,
-        ]:
-            raise ValueError("dtype must be float, np.float" " got {}".format(self.dtype))
+        if isinstance(self.dtype, str) and self.dtype\
+                not in ['float', 'float16', 'float32', 'float64']:
+            raise ValueError("dtype must be 'float', 'float16', 'float32'"
+                             "or 'float64'"
+                             " got {}".format(self.dtype))
+        elif isinstance(self.dtype, type) and \
+                not np.issubdtype(self.dtype, np.floating):
+            raise ValueError("dtype must be a np.floating subtype;"
+                             " got {}".format(self.dtype))
 
         if transform is None:
             transform = "identity"
         self.set_transformer(transform)
 
-    def set_transformer(self, transform="identitiy"):
+    def set_transformer(self, transform="identity"):
         """Define rvs and transformer spaces.
 
         Parameters
@@ -390,6 +394,10 @@ class Real(Dimension):
     def bounds(self):
         return (self.low, self.high)
 
+    @property
+    def is_constant(self):
+        return self.low == self.high
+
     def __contains__(self, point):
         if isinstance(point, list):
             point = np.array(point)
@@ -441,14 +449,16 @@ class Integer(Dimension):
     prior : "uniform" or "log-uniform", default="uniform"
         Distribution to use when sampling random integers for
         this dimension.
-        - If `"uniform"`, intgers are sampled uniformly between the lower
+
+        - If `"uniform"`, integers are sampled uniformly between the lower
           and upper bounds.
-        - If `"log-uniform"`, intgers are sampled uniformly between
+        - If `"log-uniform"`, integers are sampled uniformly between
           `log(lower, base)` and `log(upper, base)` where log
           has base `base`.
 
     base : int
         The logarithmic base to use for a log-uniform prior.
+
         - Default 10, otherwise commonly 2.
 
     transform : "identity", "normalize", optional
@@ -467,6 +477,7 @@ class Integer(Dimension):
         can be int, np.int16, np.uint32, np.int32, np.int64 (default).
         When set to int, `inverse_transform` returns a list instead of
         a numpy array
+
     """
 
     def __init__(
@@ -480,10 +491,11 @@ class Integer(Dimension):
         dtype=np.int64,
     ):
         if high <= low:
-            raise ValueError(
-                "the lower bound {} has to be less than the"
-                " upper bound {}".format(low, high)
-            )
+            raise ValueError("the lower bound {} has to be less than the"
+                             " upper bound {}".format(low, high))
+        if prior not in ["uniform", "log-uniform"]:
+            raise ValueError("prior should be 'uniform' or 'log-uniform'"
+                             " got {}".format(prior))
         self.low = low
         self.high = high
         self.prior = prior
@@ -534,7 +546,7 @@ class Integer(Dimension):
             transform = "identity"
         self.set_transformer(transform)
 
-    def set_transformer(self, transform="identitiy"):
+    def set_transformer(self, transform="identity"):
         """Define _rvs and transformer spaces.
 
         Parameters
@@ -621,6 +633,10 @@ class Integer(Dimension):
     def bounds(self):
         return (self.low, self.high)
 
+    @property
+    def is_constant(self):
+        return self.low == self.high
+
     def __contains__(self, point):
         if isinstance(point, list):
             point = np.array(point)
@@ -632,7 +648,7 @@ class Integer(Dimension):
     @property
     def transformed_bounds(self):
         if self.transform_ == "normalize":
-            return 0, 1
+            return 0., 1.
         else:
             return (self.low, self.high)
 
@@ -668,9 +684,10 @@ class Categorical(Dimension):
         are equally likely.
 
     transform : "onehot", "string", "identity", "label", default="onehot"
+
         - "identity", the transformed space is the same as the original
           space.
-        -  "string",  the transformed space is a string encoded
+        - "string",  the transformed space is a string encoded
           representation of the original space.
         - "label", the transformed space is a label encoded
           representation (integer) of the original space.
@@ -679,6 +696,7 @@ class Categorical(Dimension):
 
     name : str or None
         Name associated with dimension, e.g., "colors".
+
     """
 
     def __init__(self, categories, prior=None, transform=None, name=None):
@@ -725,11 +743,8 @@ class Categorical(Dimension):
             self.transformer.fit(self.categories)
         elif transform == "normalize":
             self.transformer = Pipeline(
-                [
-                    LabelEncoder(list(self.categories)),
-                    Normalize(0, len(self.categories) - 1),
-                ]
-            )
+                [LabelEncoder(list(self.categories)),
+                 Normalize(0, len(self.categories) - 1, is_int=True)])
         else:
             self.transformer = Identity()
             self.transformer.fit(self.categories)
@@ -795,13 +810,17 @@ class Categorical(Dimension):
     def bounds(self):
         return self.categories
 
+    @property
+    def is_constant(self):
+        return len(self.categories) <= 1
+
     def __contains__(self, point):
         return point in self.categories
 
     @property
     def transformed_bounds(self):
         if self.transformed_size == 1:
-            return (0.0, 1.0)
+            return 0.0, 1.0
         else:
             return [(0.0, 1.0) for i in range(self.transformed_size)]
 
@@ -923,6 +942,21 @@ class Space(object):
         return iter(self.dimensions)
 
     @property
+    def dimension_names(self):
+        """
+        Names of all the dimensions in the search-space.
+        """
+        index = 0
+        names = []
+        for dim in self.dimensions:
+            if dim.name is None:
+                names.append("X_%d" % index)
+            else:
+                names.append(dim.name)
+            index += 1
+        return names
+
+    @property
     def is_real(self):
         """
         Returns true if all dimensions are Real
@@ -938,25 +972,28 @@ class Space(object):
         yml_path : str
             Full path to yaml configuration file, example YaML below:
             Space:
-              - Integer:
-                  low: -5
-                  high: 5
-              - Categorical:
-                  categories:
-                  - a
-                  - b
-              - Real:
-                  low: 1.0
-                  high: 5.0
-                  prior: log-uniform
+
+            - Integer:
+              low: -5
+              high: 5
+            - Categorical:
+              categories:
+              - a
+              - b
+            - Real:
+              low: 1.0
+              high: 5.0
+              prior: log-uniform
+
         namespace : str, default=None
            Namespace within configuration file to use, will use first
-             namespace if not provided
+           namespace if not provided
 
         Returns
         -------
         space : Space
            Instantiated Space object
+
         """
         with open(yml_path, "rb") as f:
             config = yaml.safe_load(f)
@@ -1060,22 +1097,12 @@ class Space(object):
         else:
             # Draw
             columns = []
+
             for dim in self.dimensions:
-                if sp_version < (0, 16):
-                    columns.append(dim.rvs(n_samples=n_samples))
-                else:
-                    columns.append(dim.rvs(n_samples=n_samples, random_state=rng))
+                columns.append(dim.rvs(n_samples=n_samples, random_state=rng))
 
             # Transpose
-            rows = []
-            for i in range(n_samples):
-                r = []
-                for j in range(self.n_dims):
-                    r.append(columns[j][i])
-
-                rows.append(r)
-
-            return rows
+            return _transpose_list_array(columns)
 
     def set_transformer(self, transform):
         """Sets the transformer of all dimension objects to `transform`
@@ -1112,10 +1139,7 @@ class Space(object):
 
     def get_transformer(self):
         """Returns all transformers as list"""
-        transformer = []
-        for j in range(self.n_dims):
-            transformer.append(self.dimensions[j].transform_)
-        return transformer
+        return [self.dimensions[j].transform_ for j in range(self.n_dims)]
 
     def transform(self, X):
         """Transform samples from the original space into a warped space.
@@ -1176,7 +1200,7 @@ class Space(object):
         # Inverse transform
         columns = []
         start = 0
-
+        Xt = np.asarray(Xt)
         for j in range(self.n_dims):
             dim = self.dimensions[j]
             offset = dim.transformed_size
@@ -1189,16 +1213,7 @@ class Space(object):
             start += offset
 
         # Transpose
-        rows = []
-
-        for i in range(len(Xt)):
-            r = []
-            for j in range(self.n_dims):
-                r.append(columns[j][i])
-
-            rows.append(r)
-
-        return rows
+        return _transpose_list_array(columns)
 
     @property
     def n_dims(self):
@@ -1230,6 +1245,58 @@ class Space(object):
                 return False
         return True
 
+    def __getitem__(self, dimension_names):
+        """
+        Lookup and return the search-space dimension with the given name.
+
+        This allows for dict-like lookup of dimensions, for example:
+        `space['foo']` returns the dimension named 'foo' if it exists,
+        otherwise `None` is returned.
+
+        It also allows for lookup of a list of dimension-names, for example:
+        `space[['foo', 'bar']]` returns the two dimensions named
+        'foo' and 'bar' if they exist.
+
+        Parameters
+        ----------
+        dimension_names : str or list(str)
+            Name of a single search-space dimension (str).
+            List of names for search-space dimensions (list(str)).
+
+        Returns
+        -------
+        dims tuple (index, Dimension), list(tuple(index, Dimension)), \
+                (None, None)
+            A single search-space dimension with the given name,
+            or a list of search-space dimensions with the given names.
+        """
+
+        def _get(dimension_name):
+            """Helper-function for getting a single dimension."""
+            index = 0
+            # Get the index of the search-space dimension using its name.
+            for dim in self.dimensions:
+                if dimension_name == dim.name:
+                    return (index, dim)
+                elif dimension_name == index:
+                    return (index, dim)
+                index += 1
+            return (None, None)
+
+        if isinstance(dimension_names, (str, int)):
+            # Get a single search-space dimension.
+            dims = _get(dimension_name=dimension_names)
+        elif isinstance(dimension_names, (list, tuple)):
+            # Get a list of search-space dimensions.
+            # Note that we do not check whether the names are really strings.
+            dims = [_get(dimension_name=name) for name in dimension_names]
+        else:
+            msg = "Dimension name should be either string or" \
+                  "list of strings, but got {}."
+            raise ValueError(msg.format(type(dimension_names)))
+
+        return dims
+
     @property
     def transformed_bounds(self):
         """The dimension bounds, in the warped space."""
@@ -1252,6 +1319,17 @@ class Space(object):
     def is_partly_categorical(self):
         """Space contains any categorical dimensions"""
         return any([isinstance(dim, Categorical) for dim in self.dimensions])
+
+    @property
+    def n_constant_dimensions(self):
+        """Returns the number of constant dimensions which have zero degree of
+        freedom, e.g. an Integer dimensions with (0., 0.) as bounds.
+        """
+        n = 0
+        for dim in self.dimensions:
+            if dim.is_constant:
+                n += 1
+        return n
 
     def distance(self, point_a, point_b):
         """Compute distance between two points in this space.

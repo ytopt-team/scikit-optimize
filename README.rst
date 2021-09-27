@@ -29,8 +29,7 @@ Important links
 
 -  Static documentation - `Static
    documentation <https://scikit-optimize.github.io/>`__
--  Example notebooks - can be found in the
-   `examples directory <https://github.com/scikit-optimize/scikit-optimize/tree/master/examples>`_.
+-  Example notebooks - can be found in examples_.
 -  Issue tracker -
    https://github.com/scikit-optimize/scikit-optimize/issues
 -  Releases - https://pypi.python.org/pypi/scikit-optimize
@@ -38,8 +37,16 @@ Important links
 Install
 -------
 
-The latest released version of scikit-optimize is v0.7.2, which you can install
-with:
+scikit-optimize requires
+
+* Python >= 3.6
+* NumPy (>= 1.13.3)
+* SciPy (>= 0.19.1)
+* joblib (>= 0.11)
+* scikit-learn >= 0.20
+* matplotlib >= 2.0.0
+
+You can install the latest release with:
 ::
 
     pip install scikit-optimize
@@ -97,9 +104,8 @@ class:
 
 
 Read our `introduction to bayesian
-optimization <https://scikit-optimize.github.io/notebooks/bayesian-optimization.html>`__
-and the other
-`examples <https://github.com/scikit-optimize/scikit-optimize/tree/master/examples>`__.
+optimization <https://scikit-optimize.github.io/stable/auto_examples/bayesian-optimization.html>`__
+and the other examples_.
 
 
 Development
@@ -107,7 +113,7 @@ Development
 
 The library is still experimental and under heavy development. Checkout
 the `next
-milestone <https://github.com/scikit-optimize/scikit-optimize/milestone/6>`__
+milestone <https://github.com/scikit-optimize/scikit-optimize/milestones>`__
 for the plans for the next release or look at some `easy
 issues <https://github.com/scikit-optimize/scikit-optimize/issues?q=is%3Aissue+is%3Aopen+label%3AEasy>`__
 to get started contributing.
@@ -139,7 +145,7 @@ create a new issue and work through the following checklist:
 * update the version tag in ``__init__.py``
 * update the version tag mentioned in the README
 * check if the dependencies in ``setup.py`` are valid or need unpinning
-* check that the ``CHANGELOG.md`` is up to date
+* check that the ``doc/whats_new/v0.X.rst`` is up to date
 * did the last build of master succeed?
 * create a `new release <https://github.com/scikit-optimize/scikit-optimize/releases>`__
 * ping `conda-forge <https://github.com/conda-forge/scikit-optimize-feedstock>`__
@@ -198,3 +204,4 @@ recognition, feel free to add them to the "Made possible by" list.
    :target: https://gitter.im/scikit-optimize/Lobby
 .. |Zenodo DOI| image:: https://zenodo.org/badge/54340642.svg
    :target: https://zenodo.org/badge/latestdoi/54340642
+.. _examples: https://scikit-optimize.github.io/stable/auto_examples/index.html

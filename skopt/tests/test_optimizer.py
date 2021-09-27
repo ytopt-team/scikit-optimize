@@ -300,7 +300,14 @@ def test_optimizer_base_estimator_string_invalid():
 @pytest.mark.parametrize("base_estimator", ESTIMATOR_STRINGS)
 def test_optimizer_base_estimator_string_smoke(base_estimator):
     opt = Optimizer([(-2.0, 2.0)], base_estimator=base_estimator,
-                    n_initial_points=1, acq_func="EI")
+                    n_initial_points=2, acq_func="EI")
+    opt.run(func=lambda x: x[0]**2, n_iter=3)
+
+
+@pytest.mark.fast_test
+def test_optimizer_base_estimator_string_smoke_njobs():
+    opt = Optimizer([(-2.0, 2.0)], base_estimator="GBRT",
+                    n_initial_points=1, acq_func="EI", n_jobs=-1)
     opt.run(func=lambda x: x[0]**2, n_iter=3)
 
 
@@ -314,8 +321,6 @@ def test_defaults_are_equivalent():
     for n in range(12):
         x = opt.ask()
         res_opt = opt.tell(x, branin(x))
-
-
 
     #res_min = forest_minimize(branin, space, n_calls=12, random_state=1)
     res_min = gp_minimize(branin, space, n_calls=12, random_state=1)
@@ -337,7 +342,7 @@ def test_dimensions_names():
     space = [Real(0, 1, name='real'),
              Categorical(['a', 'b', 'c'], name='cat'),
              Integer(0, 1, name='int')]
-    opt = Optimizer(space, n_initial_points=1)
+    opt = Optimizer(space, n_initial_points=2)
     # result of the optimizer missing dimension names
     result = opt.tell([(0.5, 'a', 0.5)], [3])
     names = []
@@ -348,3 +353,50 @@ def test_dimensions_names():
     assert "cat" in names
     assert "int" in names
     assert None not in names
+
+
+@pytest.mark.fast_test
+def test_categorical_only():
+    from skopt.space import Categorical
+    cat1 = Categorical([2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+    cat2 = Categorical([2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+
+    opt = Optimizer([cat1, cat2])
+    for n in range(15):
+        x = opt.ask()
+        res = opt.tell(x, 12 * n)
+    assert len(res.x_iters) == 15
+    next_x = opt.ask(n_points=4)
+    assert len(next_x) == 4
+
+    cat3 = Categorical(["2", "3", "4", "5", "6", "7", "8", "9", "10", "11"])
+    cat4 = Categorical(["2", "3", "4", "5", "6", "7", "8", "9", "10", "11"])
+
+    opt = Optimizer([cat3, cat4])
+    for n in range(15):
+        x = opt.ask()
+        res = opt.tell(x, 12 * n)
+    assert len(res.x_iters) == 15
+    next_x = opt.ask(n_points=4)
+    assert len(next_x) == 4
+
+
+def test_categorical_only2():
+    from numpy import linalg
+    from skopt.space import Categorical
+    from skopt.learning import GaussianProcessRegressor
+    space = [Categorical([1, 2, 3]), Categorical([4, 5, 6])]
+    opt = Optimizer(space,
+                    base_estimator=GaussianProcessRegressor(alpha=1e-7),
+                    acq_optimizer='lbfgs',
+                    n_initial_points=10,
+                    n_jobs=2)
+
+    next_x = opt.ask(n_points=4)
+    assert len(next_x) == 4
+    opt.tell(next_x, [linalg.norm(x) for x in next_x])
+    next_x = opt.ask(n_points=4)
+    assert len(next_x) == 4
+    opt.tell(next_x, [linalg.norm(x) for x in next_x])
+    next_x = opt.ask(n_points=4)
+    assert len(next_x) == 4

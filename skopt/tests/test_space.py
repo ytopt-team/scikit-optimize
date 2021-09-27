@@ -16,6 +16,7 @@ from skopt.space import Real
 from skopt.space import Integer
 from skopt.space import Categorical
 from skopt.space import check_dimension as space_check_dimension
+from skopt.utils import normalize_dimensions
 
 
 def check_dimension(Dimension, vals, random_val):
@@ -40,8 +41,8 @@ def check_limits(value, low, high):
     # check if low <= value <= high
     if isinstance(value, list):
         value = np.array(value)
-    assert low <= value
-    assert high >= value
+    assert np.all(low <= value)
+    assert np.all(high >= value)
 
 
 @pytest.mark.fast_test
@@ -367,6 +368,17 @@ def test_space_from_space():
 
 
 @pytest.mark.fast_test
+def test_constant_property():
+    space = Space([(0.0, 1.0), (1,),
+                   ("a", "b", "c"), (1.0, 5.0, "log-uniform"), ("e",)])
+    assert space.n_constant_dimensions == 2
+    for i in [1, 4]:
+        assert space.dimensions[i].is_constant
+    for i in [0, 2, 3]:
+        assert not space.dimensions[i].is_constant
+
+
+@pytest.mark.fast_test
 def test_set_get_transformer():
     # can you pass a Space instance to the Space constructor?
     space = Space([(0.0, 1.0), (-5, 5),
@@ -397,6 +409,20 @@ def test_normalize():
     assert_array_equal(space.inverse_transform(Xt), X)
     assert_array_equal(space.inverse_transform(space.transform(X)), X)
 
+
+@pytest.mark.fast_test
+def test_normalize_types():
+    # can you pass a Space instance to the Space constructor?
+    space = Space([(0.0, 1.0), Integer(-5, 5, dtype=int), (True, False)])
+    space.set_transformer("normalize")
+    X = [[0., -5, False]]
+    Xt = np.zeros((1, 3))
+    assert_array_equal(space.transform(X), Xt)
+    assert_array_equal(space.inverse_transform(Xt), X)
+    assert_array_equal(space.inverse_transform(space.transform(X)), X)
+    assert isinstance(space.inverse_transform(Xt)[0][0], float)
+    assert isinstance(space.inverse_transform(Xt)[0][1], int)
+    assert isinstance(space.inverse_transform(Xt)[0][2], (np.bool_, bool))
 
 @pytest.mark.fast_test
 def test_normalize_real():
@@ -471,7 +497,7 @@ def test_normalize_integer():
     for i in range(50):
         check_limits(a.rvs(random_state=i), 2, 30)
     assert_array_equal(a.transformed_bounds, (0, 1))
-
+    rng = np.random.RandomState(0)
     X = rng.randint(2, 31, dtype=np.int64)
     # Check transformed values are in [0, 1]
     assert np.all(a.transform(X) <= np.ones_like(X))
@@ -517,9 +543,9 @@ def test_normalize_categorical():
     a = Categorical(categories, transform="normalize")
     for i in range(len(categories)):
         assert a.rvs(random_state=i)[0] in categories
-    assert a.inverse_transform(0.) == categories[0]
-    assert a.inverse_transform(0.5) == categories[1]
-    assert a.inverse_transform(1.0) == categories[2]
+    assert a.inverse_transform([0.]) == [categories[0]]
+    assert a.inverse_transform([0.5]) == [categories[1]]
+    assert a.inverse_transform([1.0]) == [categories[2]]
     assert_array_equal(categories, a.inverse_transform([0., 0.5, 1]))
 
     categories = [1, 2, 3]
@@ -653,11 +679,30 @@ def test_dimension_bounds(dimension, bounds):
 
 
 @pytest.mark.parametrize("dimension, name",
-                         [(Real(1, 2, name="learning rate"), "learning rate"),
-                          (Integer(1, 100, name="no of trees"), "no of trees"),
+                         [(Real(1, 2, name="learning_rate"), "learning_rate"),
+                          (Integer(1, 100, name="n_trees"), "n_trees"),
                           (Categorical(["red, blue"], name="colors"), "colors")])
 def test_dimension_name(dimension, name):
     assert dimension.name == name
+
+
+def test_dimension_name():
+    notnames = [1, 1., True]
+    for n in notnames:
+        with pytest.raises(ValueError) as exc:
+            real = Real(1, 2, name=n)
+            assert("Dimension's name must be either string or"
+                   "None." == exc.value.args[0])
+    s = Space([Real(1, 2, name="a"),
+               Integer(1, 100, name="b"),
+               Categorical(["red, blue"], name="c")])
+    assert s["a"] == (0, s.dimensions[0])
+    assert s["a", "c"] == [(0, s.dimensions[0]), (2, s.dimensions[2])]
+    assert s[["a", "c"]] == [(0, s.dimensions[0]), (2, s.dimensions[2])]
+    assert s[("a", "c")] == [(0, s.dimensions[0]), (2, s.dimensions[2])]
+    assert s[0] == (0, s.dimensions[0])
+    assert s[0, "c"] == [(0, s.dimensions[0]), (2, s.dimensions[2])]
+    assert s[0, 2] == [(0, s.dimensions[0]), (2, s.dimensions[2])]
 
 
 @pytest.mark.parametrize("dimension",
@@ -716,11 +761,12 @@ def test_dimension_with_invalid_names(name):
 def test_purely_categorical_space():
     # Test reproduces the bug in #908, make sure it doesn't come back
     dims = [Categorical(['a', 'b', 'c']), Categorical(['A', 'B', 'C'])]
-    optimizer = Optimizer(dims, n_initial_points=1, random_state=3)
+    optimizer = Optimizer(dims, n_initial_points=2, random_state=3)
 
-    x = optimizer.ask()
-    # before the fix this call raised an exception
-    optimizer.tell(x, 1.)
+    for _ in range(2):
+        x = optimizer.ask()
+        # before the fix this call raised an exception
+        optimizer.tell(x, np.random.uniform())
 
 
 @pytest.mark.fast_test
@@ -732,3 +778,19 @@ def test_partly_categorical_space():
     assert not dims.is_categorical
     dims = Space([Integer(1, 2), Integer(1, 2)])
     assert not dims.is_partly_categorical
+
+
+@pytest.mark.fast_test
+def test_normalize_bounds():
+    bounds = [(-999, 189000), Categorical((True, False))]
+    space = Space(normalize_dimensions(bounds))
+    for a in np.linspace(1e-9, 0.4999, 1000):
+        x = space.inverse_transform([[a, a]])
+        check_limits(x[0][0], -999, 189000)
+        y = space.transform(x)
+        check_limits(y, 0., 1.)
+    for a in np.linspace(0.50001, 1e-9 + 1., 1000):
+        x = space.inverse_transform([[a, a]])
+        check_limits(x[0][0], -999, 189000)
+        y = space.transform(x)
+        check_limits(y, 0., 1.)
