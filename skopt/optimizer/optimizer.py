@@ -3,6 +3,7 @@ import warnings
 from math import log
 from numbers import Number
 
+import ConfigSpace as CS
 import numpy as np
 
 from scipy.optimize import fmin_l_bfgs_b
@@ -27,12 +28,13 @@ from ..utils import is_2Dlistlike
 from ..utils import normalize_dimensions
 from ..utils import cook_initial_point_generator
 
+
 class ExhaustedSearchSpace(RuntimeError):
     """"Raised when the search cannot sample new points from the ConfigSpace.
     """
 
     def __str__(self):
-        return f'The search space is exhausted and the search cannot sample new points!'
+        return f"The search space is exhausted and the search cannot sample new points!"
 
 
 class Optimizer(object):
@@ -158,15 +160,20 @@ class Optimizer(object):
 
     """
 
-    def __init__(self, dimensions, base_estimator="gp",
-                 n_random_starts=None, n_initial_points=10,
-                 initial_point_generator="random",
-                 acq_func="gp_hedge",
-                 acq_optimizer="auto",
-                 random_state=None,
-                 model_queue_size=None,
-                 acq_func_kwargs=None,
-                 acq_optimizer_kwargs=None):
+    def __init__(
+        self,
+        dimensions,
+        base_estimator="gp",
+        n_random_starts=None,
+        n_initial_points=10,
+        initial_point_generator="random",
+        acq_func="gp_hedge",
+        acq_optimizer="auto",
+        random_state=None,
+        model_queue_size=None,
+        acq_func_kwargs=None,
+        acq_optimizer_kwargs=None,
+    ):
 
         self.rng = check_random_state(random_state)
         self.converged = False
@@ -178,8 +185,10 @@ class Optimizer(object):
 
         allowed_acq_funcs = ["gp_hedge", "EI", "LCB", "PI", "EIps", "PIps"]
         if self.acq_func not in allowed_acq_funcs:
-            raise ValueError("expected acq_func to be in %s, got %s" %
-                             (",".join(allowed_acq_funcs), self.acq_func))
+            raise ValueError(
+                "expected acq_func to be in %s, got %s"
+                % (",".join(allowed_acq_funcs), self.acq_func)
+            )
 
         # treat hedging method separately
         if self.acq_func == "gp_hedge":
@@ -196,14 +205,16 @@ class Optimizer(object):
 
         # Check `n_random_starts` deprecation first
         if n_random_starts is not None:
-            warnings.warn(("n_random_starts will be removed in favour of "
-                           "n_initial_points."),
-                          DeprecationWarning)
+            warnings.warn(
+                ("n_random_starts will be removed in favour of " "n_initial_points."),
+                DeprecationWarning,
+            )
             n_initial_points = n_random_starts
 
         if n_initial_points < 0:
             raise ValueError(
-                "Expected `n_initial_points` >= 0, got %d" % n_initial_points)
+                "Expected `n_initial_points` >= 0, got %d" % n_initial_points
+            )
         self._n_initial_points = n_initial_points
         self.n_initial_points_ = n_initial_points
 
@@ -212,13 +223,14 @@ class Optimizer(object):
         # build base_estimator if doesn't exist
         if isinstance(base_estimator, str):
             base_estimator = cook_estimator(
-                base_estimator, space=dimensions,
-                random_state=self.rng.randint(0, np.iinfo(np.int32).max))
+                base_estimator,
+                space=dimensions,
+                random_state=self.rng.randint(0, np.iinfo(np.int32).max),
+            )
 
         # check if regressor
         if not is_regressor(base_estimator) and base_estimator is not None:
-            raise ValueError(
-                "%s has to be a regressor." % base_estimator)
+            raise ValueError("%s has to be a regressor." % base_estimator)
 
         # treat per second acqusition function specially
         is_multi_regressor = isinstance(base_estimator, MultiOutputRegressor)
@@ -237,14 +249,17 @@ class Optimizer(object):
                 acq_optimizer = "sampling"
 
         if acq_optimizer not in ["lbfgs", "sampling"]:
-            raise ValueError("Expected acq_optimizer to be 'lbfgs' or "
-                             "'sampling', got {0}".format(acq_optimizer))
+            raise ValueError(
+                "Expected acq_optimizer to be 'lbfgs' or "
+                "'sampling', got {0}".format(acq_optimizer)
+            )
 
-        if (not has_gradients(self.base_estimator_) and
-                acq_optimizer != "sampling"):
-            raise ValueError("The regressor {0} should run with "
-                             "acq_optimizer"
-                             "='sampling'.".format(type(base_estimator)))
+        if not has_gradients(self.base_estimator_) and acq_optimizer != "sampling":
+            raise ValueError(
+                "The regressor {0} should run with "
+                "acq_optimizer"
+                "='sampling'.".format(type(base_estimator))
+            )
         self.acq_optimizer = acq_optimizer
 
         # record other arguments
@@ -252,29 +267,39 @@ class Optimizer(object):
             acq_optimizer_kwargs = dict()
 
         self.n_points = acq_optimizer_kwargs.get("n_points", 10000)
-        self.n_restarts_optimizer = acq_optimizer_kwargs.get(
-            "n_restarts_optimizer", 5)
+        self.n_restarts_optimizer = acq_optimizer_kwargs.get("n_restarts_optimizer", 5)
         n_jobs = acq_optimizer_kwargs.get("n_jobs", 1)
         self.n_jobs = n_jobs
         self.acq_optimizer_kwargs = acq_optimizer_kwargs
 
         # Configure search space
 
-        # normalize space if GP regressor
-        if isinstance(self.base_estimator_, GaussianProcessRegressor):
-            dimensions = normalize_dimensions(dimensions)
-        self.config_space = dimensions # save the config space to do a real copy of the Optimizer
+        if type(dimensions) is CS.ConfigurationSpace:
+            # Save the config space to do a real copy of the Optimizer
+            self.config_space = dimensions
+
+            if isinstance(self.base_estimator_, GaussianProcessRegressor):
+                raise RuntimeError("GP estimator is not available with ConfigSpace!")
+        else:
+
+            # normalize space if GP regressor
+            if isinstance(self.base_estimator_, GaussianProcessRegressor):
+                dimensions = normalize_dimensions(dimensions)
+
         self.space = Space(dimensions)
 
         self._initial_samples = None
         self._initial_point_generator = cook_initial_point_generator(
-            initial_point_generator)
+            initial_point_generator
+        )
 
         if self._initial_point_generator is not None:
             transformer = self.space.get_transformer()
             self._initial_samples = self._initial_point_generator.generate(
-                self.space.dimensions, n_initial_points,
-                random_state=self.rng.randint(0, np.iinfo(np.int32).max))
+                self.space.dimensions,
+                n_initial_points,
+                random_state=self.rng.randint(0, np.iinfo(np.int32).max),
+            )
             self.space.set_transformer(transformer)
 
         # record categorical and non-categorical indices
@@ -288,8 +313,10 @@ class Optimizer(object):
 
         # Initialize storage for optimization
         if not isinstance(model_queue_size, (int, type(None))):
-            raise TypeError("model_queue_size should be an int or None, "
-                            "got {}".format(type(model_queue_size)))
+            raise TypeError(
+                "model_queue_size should be an int or None, "
+                "got {}".format(type(model_queue_size))
+            )
         self.max_model_queue_size = model_queue_size
         self.models = []
         self.Xi = []
@@ -311,7 +338,9 @@ class Optimizer(object):
         """
 
         optimizer = Optimizer(
-            dimensions=self.config_space, #self.space.dimensions,
+            dimensions=self.config_space
+            if hasattr(self, "config_space")
+            else self.space.dimensions,
             base_estimator=self.base_estimator_,
             n_initial_points=self.n_initial_points_,
             initial_point_generator=self._initial_point_generator,
@@ -319,7 +348,7 @@ class Optimizer(object):
             acq_optimizer=self.acq_optimizer,
             acq_func_kwargs=self.acq_func_kwargs,
             acq_optimizer_kwargs=self.acq_optimizer_kwargs,
-            random_state=random_state
+            random_state=random_state,
         )
         optimizer._initial_samples = self._initial_samples
         if hasattr(self, "gains_"):
@@ -367,14 +396,14 @@ class Optimizer(object):
         supported_strategies = ["cl_min", "cl_mean", "cl_max"]
 
         if not (isinstance(n_points, int) and n_points > 0):
-            raise ValueError(
-                "n_points should be int > 0, got " + str(n_points)
-            )
+            raise ValueError("n_points should be int > 0, got " + str(n_points))
 
         if strategy not in supported_strategies:
             raise ValueError(
-                "Expected parallel_strategy to be one of " +
-                str(supported_strategies) + ", " + "got %s" % strategy
+                "Expected parallel_strategy to be one of "
+                + str(supported_strategies)
+                + ", "
+                + "got %s" % strategy
             )
 
         # Caching the result with n_points not None. If some new parameters
@@ -385,8 +414,7 @@ class Optimizer(object):
         # Copy of the optimizer is made in order to manage the
         # deletion of points with "lie" objective (the copy of
         # oiptimizer is simply discarded)
-        opt = self.copy(random_state=self.rng.randint(0,
-                                                      np.iinfo(np.int32).max))
+        opt = self.copy(random_state=self.rng.randint(0, np.iinfo(np.int32).max))
 
         X = []
         for i in range(n_points):
@@ -433,21 +461,23 @@ class Optimizer(object):
             else:
                 # The samples are evaluated starting form initial_samples[0]
                 return self._initial_samples[
-                    len(self._initial_samples) - self._n_initial_points]
+                    len(self._initial_samples) - self._n_initial_points
+                ]
 
         else:
             if not self.models:
-                raise RuntimeError("Random evaluations exhausted and no "
-                                   "model has been fit.")
+                raise RuntimeError(
+                    "Random evaluations exhausted and no " "model has been fit."
+                )
 
             next_x = self._next_x
             if next_x is not None:
                 if not self.space.is_config_space:
-                    min_delta_x = min([self.space.distance(next_x, xi)
-                                    for xi in self.Xi])
+                    min_delta_x = min([self.space.distance(next_x, xi) for xi in self.Xi])
                     if abs(min_delta_x) <= 1e-8:
-                        warnings.warn("The objective has been evaluated "
-                                    "at this point before.")
+                        warnings.warn(
+                            "The objective has been evaluated " "at this point before."
+                        )
 
             # return point computed from last call to tell()
             return next_x
@@ -523,16 +553,17 @@ class Optimizer(object):
             self.yi.append(y)
             self._n_initial_points -= 1
         else:
-            raise ValueError("Type of arguments `x` (%s) and `y` (%s) "
-                             "not compatible." % (type(x), type(y)))
+            raise ValueError(
+                "Type of arguments `x` (%s) and `y` (%s) "
+                "not compatible." % (type(x), type(y))
+            )
 
         # optimizer learned something new - discard cache
         self.cache_ = {}
 
         # after being "told" n_initial_points we switch from sampling
         # random points to using a surrogate model
-        if (fit and self._n_initial_points <= 0 and
-                self.base_estimator_ is not None):
+        if fit and self._n_initial_points <= 0 and self.base_estimator_ is not None:
             transformed_bounds = np.array(self.space.transformed_bounds)
             est = clone(self.base_estimator_)
 
@@ -555,16 +586,21 @@ class Optimizer(object):
 
             # even with BFGS as optimizer we want to sample a large number
             # of points and then pick the best ones as starting points
-            X_s = self.space.rvs(n_samples=self.n_points, Xi=self.Xi, random_state=self.rng)
+            X_s = self.space.rvs(
+                n_samples=self.n_points, Xi=self.Xi, random_state=self.rng
+            )
 
-            if len(X_s) > 0: # verify if new points are sampled
+            if len(X_s) > 0:  # verify if new points are sampled
                 X = self.space.imp_const.fit_transform(self.space.transform(X_s))
                 self.next_xs_ = []
                 for cand_acq_func in self.cand_acq_funcs_:
                     values = _gaussian_acquisition(
-                        X=X, model=est, y_opt=np.min(self.yi),
+                        X=X,
+                        model=est,
+                        y_opt=np.min(self.yi),
                         acq_func=cand_acq_func,
-                        acq_func_kwargs=self.acq_func_kwargs)
+                        acq_func_kwargs=self.acq_func_kwargs,
+                    )
                     # Find the minimum of the acquisition function by randomly
                     # sampling points from the space
                     if self.acq_optimizer == "sampling":
@@ -574,19 +610,26 @@ class Optimizer(object):
                     # minimization starts from `n_restarts_optimizer` different
                     # points and the best minimum is used
                     elif self.acq_optimizer == "lbfgs":
-                        x0 = X[np.argsort(values)[:self.n_restarts_optimizer]]
+                        x0 = X[np.argsort(values)[: self.n_restarts_optimizer]]
 
                         with warnings.catch_warnings():
                             warnings.simplefilter("ignore")
                             results = Parallel(n_jobs=self.n_jobs)(
                                 delayed(fmin_l_bfgs_b)(
-                                    gaussian_acquisition_1D, x,
-                                    args=(est, np.min(self.yi), cand_acq_func,
-                                        self.acq_func_kwargs),
+                                    gaussian_acquisition_1D,
+                                    x,
+                                    args=(
+                                        est,
+                                        np.min(self.yi),
+                                        cand_acq_func,
+                                        self.acq_func_kwargs,
+                                    ),
                                     bounds=self.space.transformed_bounds,
                                     approx_grad=False,
-                                    maxiter=20)
-                                for x in x0)
+                                    maxiter=20,
+                                )
+                                for x in x0
+                            )
 
                         cand_xs = np.array([r[0] for r in results])
                         cand_acqs = np.array([r[1] for r in results])
@@ -597,8 +640,8 @@ class Optimizer(object):
                     if not self.space.is_categorical:
                         if not self.space.is_config_space:
                             next_x = np.clip(
-                                next_x, transformed_bounds[:, 0],
-                                transformed_bounds[:, 1])
+                                next_x, transformed_bounds[:, 0], transformed_bounds[:, 1]
+                            )
                     self.next_xs_.append(next_x)
 
                 if self.acq_func == "gp_hedge":
@@ -606,21 +649,18 @@ class Optimizer(object):
                     logits -= np.max(logits)
                     exp_logits = np.exp(self.eta * logits)
                     probs = exp_logits / np.sum(exp_logits)
-                    next_x = self.next_xs_[np.argmax(self.rng.multinomial(1,
-                                                                        probs))]
+                    next_x = self.next_xs_[np.argmax(self.rng.multinomial(1, probs))]
                 else:
                     next_x = self.next_xs_[0]
 
                 # note the need for [0] at the end
-                self._next_x = self.space.inverse_transform(
-                    next_x.reshape((1, -1)))[0]
+                self._next_x = self.space.inverse_transform(next_x.reshape((1, -1)))[0]
             else:
                 self.converged = True
                 raise ExhaustedSearchSpace()
 
         # Pack results
-        return create_result(self.Xi, self.yi, self.space, self.rng,
-                             models=self.models)
+        return create_result(self.Xi, self.yi, self.space, self.rng, models=self.models)
 
     def _check_y_is_valid(self, x, y):
         """Check if the shape and types of x and y are consistent."""
@@ -644,8 +684,10 @@ class Optimizer(object):
                 raise ValueError("`func` should return a scalar")
 
         else:
-            raise ValueError("Type of arguments `x` (%s) and `y` (%s) "
-                             "not compatible." % (type(x), type(y)))
+            raise ValueError(
+                "Type of arguments `x` (%s) and `y` (%s) "
+                "not compatible." % (type(x), type(y))
+            )
 
     def run(self, func, n_iter=1):
         """Execute ask() + tell() `n_iter` times"""
@@ -653,8 +695,7 @@ class Optimizer(object):
             x = self.ask()
             self.tell(x, func(x))
 
-        return create_result(self.Xi, self.yi, self.space, self.rng,
-                             models=self.models)
+        return create_result(self.Xi, self.yi, self.space, self.rng, models=self.models)
 
     def update_next(self):
         """Updates the value returned by opt.ask(). Useful if a parameter
@@ -662,7 +703,7 @@ class Optimizer(object):
         self.cache_ = {}
         # Ask for a new next_x.
         # We only need to overwrite _next_x if it exists.
-        if hasattr(self, '_next_x'):
+        if hasattr(self, "_next_x"):
             opt = self.copy(random_state=self.rng)
             self._next_x = opt._next_x
 
@@ -676,5 +717,5 @@ class Optimizer(object):
             OptimizeResult instance with the required information.
 
         """
-        return create_result(self.Xi, self.yi, self.space, self.rng,
-                             models=self.models)
+        return create_result(self.Xi, self.yi, self.space, self.rng, models=self.models)
+

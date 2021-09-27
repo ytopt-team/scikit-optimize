@@ -11,6 +11,13 @@ from scipy.stats.distributions import uniform
 from sklearn.utils import check_random_state
 from sklearn.utils.fixes import sp_version
 
+if type(sp_version) is not tuple:  # Version object since sklearn>=2.3.x
+    if hasattr(sp_version, "release"):
+        sp_version = sp_version.release
+    else:
+        sp_version = sp_version._version.release
+
+
 from .transformers import CategoricalEncoder
 from .transformers import StringEncoder
 from .transformers import LabelEncoder
@@ -27,11 +34,10 @@ from random import sample
 from sklearn.impute import SimpleImputer
 
 
-
 # helper class to be able to print [1, ..., 4] instead of [1, '...', 4]
 class _Ellipsis:
     def __repr__(self):
-        return '...'
+        return "..."
 
 
 def check_dimension(dimension, transform=None):
@@ -93,41 +99,54 @@ def check_dimension(dimension, transform=None):
         return Categorical(dimension, transform=transform)
 
     if len(dimension) == 2:
-        if any([isinstance(d, (str, bool)) or isinstance(d, np.bool_)
-                for d in dimension]):
+        if any(
+            [isinstance(d, (str, bool)) or isinstance(d, np.bool_) for d in dimension]
+        ):
             return Categorical(dimension, transform=transform)
         elif all([isinstance(dim, numbers.Integral) for dim in dimension]):
             return Integer(*dimension, transform=transform)
         elif any([isinstance(dim, numbers.Real) for dim in dimension]):
             return Real(*dimension, transform=transform)
         else:
-            raise ValueError("Invalid dimension {}. Read the documentation for"
-                             " supported types.".format(dimension))
+            raise ValueError(
+                "Invalid dimension {}. Read the documentation for"
+                " supported types.".format(dimension)
+            )
 
     if len(dimension) == 3:
-        if (any([isinstance(dim, int) for dim in dimension[:2]]) and
-                dimension[2] in ["uniform", "log-uniform"]):
+        if any([isinstance(dim, int) for dim in dimension[:2]]) and dimension[2] in [
+            "uniform",
+            "log-uniform",
+        ]:
             return Integer(*dimension, transform=transform)
-        elif (any([isinstance(dim, (float, int)) for dim in dimension[:2]]) and
-              dimension[2] in ["uniform", "log-uniform"]):
+        elif any([isinstance(dim, (float, int)) for dim in dimension[:2]]) and dimension[
+            2
+        ] in ["uniform", "log-uniform"]:
             return Real(*dimension, transform=transform)
         else:
             return Categorical(dimension, transform=transform)
 
     if len(dimension) == 4:
-        if (any([isinstance(dim, int) for dim in dimension[:2]]) and
-                dimension[2] == "log-uniform" and isinstance(dimension[3],
-                                                             int)):
+        if (
+            any([isinstance(dim, int) for dim in dimension[:2]])
+            and dimension[2] == "log-uniform"
+            and isinstance(dimension[3], int)
+        ):
             return Integer(*dimension, transform=transform)
-        elif (any([isinstance(dim, (float, int)) for dim in dimension[:2]]) and
-              dimension[2] == "log-uniform" and isinstance(dimension[3], int)):
+        elif (
+            any([isinstance(dim, (float, int)) for dim in dimension[:2]])
+            and dimension[2] == "log-uniform"
+            and isinstance(dimension[3], int)
+        ):
             return Real(*dimension, transform=transform)
 
     if len(dimension) > 3:
         return Categorical(dimension, transform=transform)
 
-    raise ValueError("Invalid dimension {}. Read the documentation for "
-                     "supported types.".format(dimension))
+    raise ValueError(
+        "Invalid dimension {}. Read the documentation for "
+        "supported types.".format(dimension)
+    )
 
 
 class Dimension(object):
@@ -196,7 +215,7 @@ def _uniform_inclusive(loc=0.0, scale=1.0):
     # like scipy.stats.distributions but inclusive of `high`
     # XXX scale + 1. might not actually be a float after scale if
     # XXX scale is very large.
-    return uniform(loc=loc, scale=np.nextafter(scale, scale + 1.))
+    return uniform(loc=loc, scale=np.nextafter(scale, scale + 1.0))
 
 
 class Real(Dimension):
@@ -237,11 +256,22 @@ class Real(Dimension):
         float type which will be used in inverse_transform,
         can be float.
     """
-    def __init__(self, low, high, prior="uniform", base=10, transform=None,
-                 name=None, dtype=np.float):
+
+    def __init__(
+        self,
+        low,
+        high,
+        prior="uniform",
+        base=10,
+        transform=None,
+        name=None,
+        dtype=np.float,
+    ):
         if high <= low:
-            raise ValueError("the lower bound {} has to be less than the"
-                             " upper bound {}".format(low, high))
+            raise ValueError(
+                "the lower bound {} has to be less than the"
+                " upper bound {}".format(low, high)
+            )
         self.low = low
         self.high = high
         self.prior = prior
@@ -252,15 +282,25 @@ class Real(Dimension):
         self._rvs = None
         self.transformer = None
         self.transform_ = transform
-        if isinstance(self.dtype, str) and self.dtype\
-                not in ['float', 'float16', 'float32', 'float64']:
-            raise ValueError("dtype must be 'float', 'float16', 'float32'"
-                             "or 'float64'"
-                             " got {}".format(self.dtype))
-        elif isinstance(self.dtype, type) and self.dtype\
-                not in [float, np.float, np.float16, np.float32, np.float64]:
-            raise ValueError("dtype must be float, np.float"
-                             " got {}".format(self.dtype))
+        if isinstance(self.dtype, str) and self.dtype not in [
+            "float",
+            "float16",
+            "float32",
+            "float64",
+        ]:
+            raise ValueError(
+                "dtype must be 'float', 'float16', 'float32'"
+                "or 'float64'"
+                " got {}".format(self.dtype)
+            )
+        elif isinstance(self.dtype, type) and self.dtype not in [
+            float,
+            np.float,
+            np.float16,
+            np.float32,
+            np.float64,
+        ]:
+            raise ValueError("dtype must be float, np.float" " got {}".format(self.dtype))
 
         if transform is None:
             transform = "identity"
@@ -278,8 +318,10 @@ class Real(Dimension):
         self.transform_ = transform
 
         if self.transform_ not in ["normalize", "identity"]:
-            raise ValueError("transform should be 'normalize' or 'identity'"
-                             " got {}".format(self.transform_))
+            raise ValueError(
+                "transform should be 'normalize' or 'identity'"
+                " got {}".format(self.transform_)
+            )
 
         # XXX: The _rvs is for sampling in the transformed space.
         # The rvs on Dimension calls inverse_transform on the points sampled
@@ -287,15 +329,18 @@ class Real(Dimension):
         if self.transform_ == "normalize":
             # set upper bound to next float after 1. to make the numbers
             # inclusive of upper edge
-            self._rvs = _uniform_inclusive(0., 1.)
+            self._rvs = _uniform_inclusive(0.0, 1.0)
             if self.prior == "uniform":
-                self.transformer = Pipeline(
-                    [Identity(), Normalize(self.low, self.high)])
+                self.transformer = Pipeline([Identity(), Normalize(self.low, self.high)])
             else:
                 self.transformer = Pipeline(
-                    [LogN(self.base),
-                     Normalize(np.log10(self.low) / self.log_base,
-                               np.log10(self.high) / self.log_base)]
+                    [
+                        LogN(self.base),
+                        Normalize(
+                            np.log10(self.low) / self.log_base,
+                            np.log10(self.high) / self.log_base,
+                        ),
+                    ]
                 )
         else:
             if self.prior == "uniform":
@@ -304,20 +349,24 @@ class Real(Dimension):
             else:
                 self._rvs = _uniform_inclusive(
                     np.log10(self.low) / self.log_base,
-                    np.log10(self.high) / self.log_base -
-                    np.log10(self.low) / self.log_base)
+                    np.log10(self.high) / self.log_base
+                    - np.log10(self.low) / self.log_base,
+                )
                 self.transformer = LogN(self.base)
 
     def __eq__(self, other):
-        return (type(self) is type(other) and
-                np.allclose([self.low], [other.low]) and
-                np.allclose([self.high], [other.high]) and
-                self.prior == other.prior and
-                self.transform_ == other.transform_)
+        return (
+            type(self) is type(other)
+            and np.allclose([self.low], [other.low])
+            and np.allclose([self.high], [other.high])
+            and self.prior == other.prior
+            and self.transform_ == other.transform_
+        )
 
     def __repr__(self):
         return "Real(low={}, high={}, prior='{}', transform='{}')".format(
-            self.low, self.high, self.prior, self.transform_)
+            self.low, self.high, self.prior, self.transform_
+        )
 
     def inverse_transform(self, Xt):
         """Inverse transform samples from the warped space back into the
@@ -328,10 +377,10 @@ class Real(Dimension):
             inv_transform = np.array(inv_transform)
 
         # PB commenting clip
-        #print(inv_transform)
-        #inv_transform = np.clip(inv_transform, self.low, self.high).astype(self.dtype)
+        # print(inv_transform)
+        # inv_transform = np.clip(inv_transform, self.low, self.high).astype(self.dtype)
 
-        if self.dtype == float or self.dtype == 'float':
+        if self.dtype == float or self.dtype == "float":
             # necessary, otherwise the type is converted to a numpy type
             return getattr(inv_transform, "tolist", lambda: value)()
         else:
@@ -371,8 +420,10 @@ class Real(Dimension):
             Second point.
         """
         if not (a in self and b in self):
-            raise RuntimeError("Can only compute distance for values within "
-                               "the space, not %s and %s." % (a, b))
+            raise RuntimeError(
+                "Can only compute distance for values within "
+                "the space, not %s and %s." % (a, b)
+            )
         return abs(a - b)
 
 
@@ -417,11 +468,22 @@ class Integer(Dimension):
         When set to int, `inverse_transform` returns a list instead of
         a numpy array
     """
-    def __init__(self, low, high, prior="uniform", base=10, transform=None,
-                 name=None, dtype=np.int64):
+
+    def __init__(
+        self,
+        low,
+        high,
+        prior="uniform",
+        base=10,
+        transform=None,
+        name=None,
+        dtype=np.int64,
+    ):
         if high <= low:
-            raise ValueError("the lower bound {} has to be less than the"
-                             " upper bound {}".format(low, high))
+            raise ValueError(
+                "the lower bound {} has to be less than the"
+                " upper bound {}".format(low, high)
+            )
         self.low = low
         self.high = high
         self.prior = prior
@@ -433,20 +495,40 @@ class Integer(Dimension):
         self._rvs = None
         self.transformer = None
 
-        if isinstance(self.dtype, str) and self.dtype\
-            not in ['int', 'int8', 'int16', 'int32', 'int64',
-                    'uint8', 'uint16', 'uint32', 'uint64']:
-            raise ValueError("dtype must be 'int', 'int8', 'int16',"
-                             "'int32', 'int64', 'uint8',"
-                             "'uint16', 'uint32', or"
-                             "'uint64', but got {}".format(self.dtype))
-        elif isinstance(self.dtype, type) and self.dtype\
-                not in [int, np.int8, np.int16, np.int32, np.int64,
-                        np.uint8, np.uint16, np.uint32, np.uint64]:
-            raise ValueError("dtype must be 'int', 'np.int8', 'np.int16',"
-                             "'np.int32', 'np.int64', 'np.uint8',"
-                             "'np.uint16', 'np.uint32', or"
-                             "'np.uint64', but got {}".format(self.dtype))
+        if isinstance(self.dtype, str) and self.dtype not in [
+            "int",
+            "int8",
+            "int16",
+            "int32",
+            "int64",
+            "uint8",
+            "uint16",
+            "uint32",
+            "uint64",
+        ]:
+            raise ValueError(
+                "dtype must be 'int', 'int8', 'int16',"
+                "'int32', 'int64', 'uint8',"
+                "'uint16', 'uint32', or"
+                "'uint64', but got {}".format(self.dtype)
+            )
+        elif isinstance(self.dtype, type) and self.dtype not in [
+            int,
+            np.int8,
+            np.int16,
+            np.int32,
+            np.int64,
+            np.uint8,
+            np.uint16,
+            np.uint32,
+            np.uint64,
+        ]:
+            raise ValueError(
+                "dtype must be 'int', 'np.int8', 'np.int16',"
+                "'np.int32', 'np.int64', 'np.uint8',"
+                "'np.uint16', 'np.uint32', or"
+                "'np.uint64', but got {}".format(self.dtype)
+            )
 
         if transform is None:
             transform = "identity"
@@ -464,20 +546,27 @@ class Integer(Dimension):
         self.transform_ = transform
 
         if transform not in ["normalize", "identity"]:
-            raise ValueError("transform should be 'normalize' or 'identity'"
-                             " got {}".format(self.transform_))
+            raise ValueError(
+                "transform should be 'normalize' or 'identity'"
+                " got {}".format(self.transform_)
+            )
 
         if self.transform_ == "normalize":
             self._rvs = _uniform_inclusive(0.0, 1.0)
             if self.prior == "uniform":
                 self.transformer = Pipeline(
-                    [Identity(), Normalize(self.low, self.high, is_int=True)])
+                    [Identity(), Normalize(self.low, self.high, is_int=True)]
+                )
             else:
 
                 self.transformer = Pipeline(
-                    [LogN(self.base),
-                     Normalize(np.log10(self.low) / self.log_base,
-                               np.log10(self.high) / self.log_base)]
+                    [
+                        LogN(self.base),
+                        Normalize(
+                            np.log10(self.low) / self.log_base,
+                            np.log10(self.high) / self.log_base,
+                        ),
+                    ]
                 )
         else:
             if self.prior == "uniform":
@@ -486,18 +575,22 @@ class Integer(Dimension):
             else:
                 self._rvs = _uniform_inclusive(
                     np.log10(self.low) / self.log_base,
-                    np.log10(self.high) / self.log_base -
-                    np.log10(self.low) / self.log_base)
+                    np.log10(self.high) / self.log_base
+                    - np.log10(self.low) / self.log_base,
+                )
                 self.transformer = LogN(self.base)
 
     def __eq__(self, other):
-        return (type(self) is type(other) and
-                np.allclose([self.low], [other.low]) and
-                np.allclose([self.high], [other.high]))
+        return (
+            type(self) is type(other)
+            and np.allclose([self.low], [other.low])
+            and np.allclose([self.high], [other.high])
+        )
 
     def __repr__(self):
         return "Integer(low={}, high={}, prior='{}', transform='{}')".format(
-            self.low, self.high, self.prior, self.transform_)
+            self.low, self.high, self.prior, self.transform_
+        )
 
     def inverse_transform(self, Xt):
         """Inverse transform samples from the warped space back into the
@@ -508,15 +601,19 @@ class Integer(Dimension):
         inv_transform = super(Integer, self).inverse_transform(Xt)
         if isinstance(inv_transform, list):
             inv_transform = np.array(inv_transform)
+        inv_transform = np.clip(inv_transform, self.low, self.high)
 
         # PB nan is a float cannot be converted to int
-        if np.isnan(inv_transform):
-            return np.round(inv_transform)
+        if any(np.isnan(inv_transform)):
+            nan_values = np.isnan(inv_transform)
+            inv_transform[nan_values] = np.round(inv_transform[nan_values])
+            return inv_transform
 
-        if self.dtype == int or self.dtype == 'int':
+        if self.dtype == int or self.dtype == "int":
             # necessary, otherwise the type is converted to a numpy type
-            return getattr(np.round(inv_transform).astype(self.dtype),
-                           "tolist", lambda: value)()
+            return getattr(
+                np.round(inv_transform).astype(self.dtype), "tolist", lambda: value
+            )()
         else:
             return np.round(inv_transform).astype(self.dtype)
 
@@ -551,9 +648,12 @@ class Integer(Dimension):
             Second point.
         """
         if not (a in self and b in self):
-            raise RuntimeError("Can only compute distance for values within "
-                               "the space, not %s and %s." % (a, b))
+            raise RuntimeError(
+                "Can only compute distance for values within "
+                "the space, not %s and %s." % (a, b)
+            )
         return abs(a - b)
+
 
 class Categorical(Dimension):
     """Search space dimension that can take on categorical values.
@@ -580,6 +680,7 @@ class Categorical(Dimension):
     name : str or None
         Name associated with dimension, e.g., "colors".
     """
+
     def __init__(self, categories, prior=None, transform=None, name=None):
         self.categories = tuple(categories)
 
@@ -593,8 +694,7 @@ class Categorical(Dimension):
         self.prior = prior
 
         if prior is None:
-            self.prior_ = np.tile(1. / len(self.categories),
-                                  len(self.categories))
+            self.prior_ = np.tile(1.0 / len(self.categories), len(self.categories))
         else:
             self.prior_ = prior
         self.set_transformer(transform)
@@ -609,10 +709,11 @@ class Categorical(Dimension):
 
         """
         self.transform_ = transform
-        if transform not in ["identity", "onehot", "string", "normalize",
-                             "label"]:
-            raise ValueError("Expected transform to be 'identity', 'string',"
-                             "'label' or 'onehot' got {}".format(transform))
+        if transform not in ["identity", "onehot", "string", "normalize", "label"]:
+            raise ValueError(
+                "Expected transform to be 'identity', 'string',"
+                "'label' or 'onehot' got {}".format(transform)
+            )
         if transform == "onehot":
             self.transformer = CategoricalEncoder()
             self.transformer.fit(self.categories)
@@ -624,8 +725,11 @@ class Categorical(Dimension):
             self.transformer.fit(self.categories)
         elif transform == "normalize":
             self.transformer = Pipeline(
-                [LabelEncoder(list(self.categories)),
-                 Normalize(0, len(self.categories) - 1)])
+                [
+                    LabelEncoder(list(self.categories)),
+                    Normalize(0, len(self.categories) - 1),
+                ]
+            )
         else:
             self.transformer = Identity()
             self.transformer.fit(self.categories)
@@ -633,14 +737,14 @@ class Categorical(Dimension):
             self._rvs = _uniform_inclusive(0.0, 1.0)
         else:
             # XXX check that sum(prior) == 1
-            self._rvs = rv_discrete(
-                values=(range(len(self.categories)), self.prior_)
-            )
+            self._rvs = rv_discrete(values=(range(len(self.categories)), self.prior_))
 
     def __eq__(self, other):
-        return (type(self) is type(other) and
-                self.categories == other.categories and
-                np.allclose(self.prior_, other.prior_))
+        return (
+            type(self) is type(other)
+            and self.categories == other.categories
+            and np.allclose(self.prior_, other.prior_)
+        )
 
     def __repr__(self):
         if len(self.categories) > 7:
@@ -716,8 +820,10 @@ class Categorical(Dimension):
             Second category.
         """
         if not (a in self and b in self):
-            raise RuntimeError("Can only compute distance for values within"
-                               " the space, not {} and {}.".format(a, b))
+            raise RuntimeError(
+                "Can only compute distance for values within"
+                " the space, not {} and {}.".format(a, b)
+            )
         return 1 if a != b else 0
 
 
@@ -742,12 +848,17 @@ class Space(object):
             The upper and lower bounds are inclusive for `Integer`
             dimensions.
     """
+
     def __init__(self, dimensions):
         self.is_config_space = False
         self.config_space_samples = None
         self.config_space_explored = False
-        self.imp_const = SimpleImputer(missing_values=np.nan, strategy='constant', fill_value = -1000)
-        self.imp_const_inv = SimpleImputer(missing_values=-1000, strategy='constant', fill_value = np.nan)
+        self.imp_const = SimpleImputer(
+            missing_values=np.nan, strategy="constant", fill_value=-1000
+        )
+        self.imp_const_inv = SimpleImputer(
+            missing_values=-1000, strategy="constant", fill_value=np.nan
+        )
         self.hps_names = []
 
         if isinstance(dimensions, CS.ConfigurationSpace):
@@ -764,33 +875,33 @@ class Space(object):
                 if isinstance(x, CS.hyperparameters.CategoricalHyperparameter):
                     vals = list(x.choices)
                     if x.name in cond_hps:
-                        vals.append('NA')
-                    param =  Categorical(vals, prior=x.probabilities, name=x.name)
+                        vals.append("NA")
+                    param = Categorical(vals, prior=x.probabilities, name=x.name)
                     space.append(param)
-                    self.hps_type[x.name] = 'Categorical'
+                    self.hps_type[x.name] = "Categorical"
                 elif isinstance(x, CS.hyperparameters.OrdinalHyperparameter):
                     vals = list(x.sequence)
                     if x.name in cond_hps:
-                        vals.append('NA')
+                        vals.append("NA")
                     param = Categorical(vals, name=x.name)
                     space.append(param)
-                    self.hps_type[x.name] = 'Categorical'
+                    self.hps_type[x.name] = "Categorical"
                 elif isinstance(x, CS.hyperparameters.UniformIntegerHyperparameter):
-                    prior = 'uniform'
+                    prior = "uniform"
                     if x.log:
-                        prior = 'log-uniform'
-                    param = Integer(x.lower,x.upper,prior=prior,name=x.name)
+                        prior = "log-uniform"
+                    param = Integer(x.lower, x.upper, prior=prior, name=x.name)
                     space.append(param)
-                    self.hps_type[x.name] = 'Integer'
+                    self.hps_type[x.name] = "Integer"
                 elif isinstance(x, CS.hyperparameters.NormalIntegerHyperparameter):
                     raise ValueError("NormalIntegerHyperparameter not implemented")
                 elif isinstance(x, CS.hyperparameters.UniformFloatHyperparameter):
-                    prior = 'uniform'
+                    prior = "uniform"
                     if x.log:
-                        prior = 'log-uniform'
-                    param = Real(x.lower,x.upper,prior=prior,name=x.name)
+                        prior = "log-uniform"
+                    param = Real(x.lower, x.upper, prior=prior, name=x.name)
                     space.append(param)
-                    self.hps_type[x.name] = 'Real'
+                    self.hps_type[x.name] = "Real"
                 elif isinstance(x, CS.hyperparameters.NormalFloatHyperparameter):
                     raise ValueError("NormalFloatHyperparameter not implemented")
                 else:
@@ -806,7 +917,7 @@ class Space(object):
             dims = self.dimensions[:15] + [_Ellipsis()] + self.dimensions[-15:]
         else:
             dims = self.dimensions
-        return "Space([{}])".format(',\n       '.join(map(str, dims)))
+        return "Space([{}])".format(",\n       ".join(map(str, dims)))
 
     def __iter__(self):
         return iter(self.dimensions)
@@ -847,12 +958,10 @@ class Space(object):
         space : Space
            Instantiated Space object
         """
-        with open(yml_path, 'rb') as f:
+        with open(yml_path, "rb") as f:
             config = yaml.safe_load(f)
 
-        dimension_classes = {'real': Real,
-                             'integer': Integer,
-                             'categorical': Categorical}
+        dimension_classes = {"real": Real, "integer": Integer, "categorical": Categorical}
 
         # Extract space options for configuration file
         if isinstance(config, dict):
@@ -863,7 +972,7 @@ class Space(object):
         elif isinstance(config, list):
             options = config
         else:
-            raise TypeError('YaML does not specify a list or dictionary')
+            raise TypeError("YaML does not specify a list or dictionary")
 
         # Populate list with Dimension objects
         dimensions = []
@@ -911,8 +1020,8 @@ class Space(object):
                 point = []
                 for hps_name in hps_names:
                     val = np.nan
-                    if self.hps_type[hps_name] == 'Categorical':
-                        val = 'NA'
+                    if self.hps_type[hps_name] == "Categorical":
+                        val = "NA"
                     if hps_name in conf.keys():
                         val = conf[hps_name]
                     point.append(val)
@@ -920,18 +1029,18 @@ class Space(object):
 
             # config space sampler wont give unique set of points; find unique
             points.sort()
-            unique_points = list(points for points,_ in itertools.groupby(points))
+            unique_points = list(points for points, _ in itertools.groupby(points))
             random.shuffle(unique_points)
 
-            if Xi is not None: # Computing unique points
+            if Xi is not None:  # Computing unique points
                 Xi_dict = {}
                 unique_points_dict = {}
                 for i in range(len(Xi)):
-                    key = '-'.join(str(Xi[i]))
+                    key = "-".join(str(Xi[i]))
                     value = Xi[i]
                     Xi_dict[key] = value
                 for i in range(len(unique_points)):
-                    key = '-'.join(str(unique_points[i]))
+                    key = "-".join(str(unique_points[i]))
                     value = unique_points[i]
                     unique_points_dict[key] = value
                 for key in Xi_dict.keys():
@@ -942,7 +1051,9 @@ class Space(object):
                 req_points = unique_points
 
             if len(req_points) > 0:
-                sel_req_points = random.choices(req_points, k = min(len(req_points),n_samples))
+                sel_req_points = random.choices(
+                    req_points, k=min(len(req_points), n_samples)
+                )
                 return sel_req_points
             else:
                 return []
@@ -1073,8 +1184,7 @@ class Space(object):
             if offset == 1:
                 columns.append(dim.inverse_transform(Xt[:, start]))
             else:
-                columns.append(
-                    dim.inverse_transform(Xt[:, start:start + offset]))
+                columns.append(dim.inverse_transform(Xt[:, start : start + offset]))
 
             start += offset
 
@@ -1154,7 +1264,7 @@ class Space(object):
         point_b : array
             Second point.
         """
-        distance = 0.
+        distance = 0.0
         for a, b, dim in zip(point_a, point_b, self.dimensions):
             distance += dim.distance(a, b)
 

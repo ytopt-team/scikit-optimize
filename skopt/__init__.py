@@ -29,11 +29,12 @@ except NameError:
 # Dev branch marker is: 'X.Y.dev' or 'X.Y.devN' where N is an integer.
 # 'X.Y.dev0' is the canonical version of 'X.Y.dev'
 #
-__version__ = "0.8.dev0"
+__version__ = "0.8.3"
 
 if __SKOPT_SETUP__:
     import sys
-    sys.stderr.write('Partial import of skopt during the build process.\n')
+
+    sys.stderr.write("Partial import of skopt during the build process.\n")
     # We are not importing the rest of scikit-optimize during the build
     # process, as it may not be compiled yet
 else:
@@ -58,6 +59,7 @@ else:
     from .utils import expected_minimum
     from .utils import expected_minimum_random_sampling
     from .utils import load
+
     __all__ = (
         "acquisition",
         "benchmarks",
@@ -76,7 +78,7 @@ else:
         "load",
         "expected_minimum",
         "BayesSearchCV",
-        "Space"
+        "Space",
     )
-    IS_PYPY = platform.python_implementation() == 'PyPy'
+    IS_PYPY = platform.python_implementation() == "PyPy"
     _IS_32BIT = 8 * struct.calcsize("P") == 32
