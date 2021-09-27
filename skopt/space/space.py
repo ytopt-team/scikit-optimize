@@ -6,7 +6,7 @@ import random
 
 from scipy.stats.distributions import randint
 from scipy.stats.distributions import rv_discrete
-from scipy.stats.distributions import uniform
+from scipy.stats.distributions import uniform, truncnorm
 
 from sklearn.utils import check_random_state
 from sklearn.utils.fixes import sp_version
@@ -25,6 +25,7 @@ from .transformers import Normalize
 from .transformers import Identity
 from .transformers import LogN
 from .transformers import Pipeline
+from .transformers import ToInteger
 
 
 import ConfigSpace as CS
@@ -237,6 +238,10 @@ def _uniform_inclusive(loc=0.0, scale=1.0):
     # XXX scale is very large.
     return uniform(loc=loc, scale=np.nextafter(scale, scale + 1.0))
 
+def _normal_inclusive(loc=0.0, scale=1.0, lower=-2, upper=2):
+    assert lower <= upper
+    a, b = (lower - loc) / scale, (upper - loc) / scale
+    return truncnorm(a, b, loc=loc, scale=scale)
 
 class Real(Dimension):
     """Search space dimension that can take on any real value.
@@ -334,6 +339,7 @@ class Real(Dimension):
             # set upper bound to next float after 1. to make the numbers
             # inclusive of upper edge
             self._rvs = _uniform_inclusive(0.0, 1.0)
+            assert self.prior in ["uniform", "log-uniform"]
             if self.prior == "uniform":
                 self.transformer = Pipeline([Identity(), Normalize(self.low, self.high)])
             else:
@@ -350,6 +356,9 @@ class Real(Dimension):
             if self.prior == "uniform":
                 self._rvs = _uniform_inclusive(self.low, self.high - self.low)
                 self.transformer = Identity()
+            elif self.prior == "normal":
+                self._rvs = _normal_inclusive(self.loc, self.scale, self.low, self.high)
+                self.transformer = Identity()
             else:
                 self._rvs = _uniform_inclusive(
                     np.log10(self.low) / self.log_base,
@@ -365,11 +374,13 @@ class Real(Dimension):
             and np.allclose([self.high], [other.high])
             and self.prior == other.prior
             and self.transform_ == other.transform_
+            and self.loc == other.loc
+            and self.scale == other.scale
         )
 
     def __repr__(self):
-        return "Real(low={}, high={}, prior='{}', transform='{}')".format(
-            self.low, self.high, self.prior, self.transform_
+        return "Real(low={}, high={}, prior='{}', transform='{}', loc='{}', scale='{}')".format(
+            self.low, self.high, self.prior, self.transform_, self.loc, self.scale
         )
 
     def inverse_transform(self, Xt):
@@ -489,6 +500,8 @@ class Integer(Dimension):
         transform=None,
         name=None,
         dtype=np.int64,
+        loc=None,
+        scale=None,
     ):
         if high <= low:
             raise ValueError("the lower bound {} has to be less than the"
@@ -506,6 +519,8 @@ class Integer(Dimension):
         self.transform_ = transform
         self._rvs = None
         self.transformer = None
+        self.loc = loc
+        self.scale = scale
 
         if isinstance(self.dtype, str) and self.dtype not in [
             "int",
@@ -565,6 +580,7 @@ class Integer(Dimension):
 
         if self.transform_ == "normalize":
             self._rvs = _uniform_inclusive(0.0, 1.0)
+            assert self.prior in ["uniform", "log-uniform"]
             if self.prior == "uniform":
                 self.transformer = Pipeline(
                     [Identity(), Normalize(self.low, self.high, is_int=True)]
@@ -584,6 +600,9 @@ class Integer(Dimension):
             if self.prior == "uniform":
                 self._rvs = randint(self.low, self.high + 1)
                 self.transformer = Identity()
+            elif self.prior == "normal":
+                self._rvs = _normal_inclusive(self.loc, self.scale, self.low, self.high)
+                self.transformer = ToInteger()
             else:
                 self._rvs = _uniform_inclusive(
                     np.log10(self.low) / self.log_base,
@@ -913,7 +932,14 @@ class Space(object):
                     space.append(param)
                     self.hps_type[x.name] = "Integer"
                 elif isinstance(x, CS.hyperparameters.NormalIntegerHyperparameter):
-                    raise ValueError("NormalIntegerHyperparameter not implemented")
+                    # TODO
+                    prior = "uniform"
+                    if x.log:
+                        prior = "log-uniform"
+                    param = Integer(x.lower, x.upper, prior=prior, name=x.name)
+                    space.append(param)
+                    self.hps_type[x.name] = "Integer"
+                    # raise ValueError("NormalIntegerHyperparameter not implemented")
                 elif isinstance(x, CS.hyperparameters.UniformFloatHyperparameter):
                     prior = "uniform"
                     if x.log:
@@ -922,9 +948,15 @@ class Space(object):
                     space.append(param)
                     self.hps_type[x.name] = "Real"
                 elif isinstance(x, CS.hyperparameters.NormalFloatHyperparameter):
-                    raise ValueError("NormalFloatHyperparameter not implemented")
+                    prior = "normal"
+                    if x.log:
+                        raise ValueError("Unsupported 'log' transformation for NormalFloatHyperparameter.")
+                    param = Real(x.lower, x.upper, prior=prior, name=x.name,
+                                 loc=x.mu, scale=x.sigma)
+                    space.append(param)
+                    self.hps_type[x.name] = "Real"
                 else:
-                    raise ValueError("Unknown Hyperparameter type")
+                    raise ValueError("Unknown Hyperparameter type.")
             dimensions = space
         self.dimensions = [check_dimension(dim) for dim in dimensions]
 

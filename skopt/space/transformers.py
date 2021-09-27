@@ -27,6 +27,15 @@ class Identity(Transformer):
     def inverse_transform(self, Xt):
         return Xt
 
+class ToInteger(Transformer):
+    """Identity transform.
+    """
+
+    def transform(self, X):
+        return int(X)
+
+    def inverse_transform(self, Xt):
+        return Xt
 
 class StringEncoder(Transformer):
     """StringEncoder transform.
