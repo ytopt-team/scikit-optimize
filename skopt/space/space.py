@@ -4,12 +4,15 @@ import yaml
 import sys
 import random
 
+import pandas as pd
+
 from scipy.stats.distributions import randint
 from scipy.stats.distributions import rv_discrete
 from scipy.stats.distributions import uniform, truncnorm
 
 from sklearn.utils import check_random_state
 from sklearn.utils.fixes import sp_version
+
 
 if type(sp_version) is not tuple:  # Version object since sklearn>=2.3.x
     if hasattr(sp_version, "release"):
@@ -1097,27 +1100,17 @@ class Space(object):
                 points.append(point)
 
             # config space sampler wont give unique set of points; find unique
-            points.sort()
-            unique_points = list(points for points, _ in itertools.groupby(points))
-            random.shuffle(unique_points)
+            points = pd.DataFrame(data=points, columns=hps_names)
+            unique_points = points[~points.duplicated(keep=False)].to_numpy()
 
             if Xi is not None:  # Computing unique points
-                Xi_dict = {}
-                unique_points_dict = {}
-                for i in range(len(Xi)):
-                    key = "-".join(str(Xi[i]))
-                    value = Xi[i]
-                    Xi_dict[key] = value
-                for i in range(len(unique_points)):
-                    key = "-".join(str(unique_points[i]))
-                    value = unique_points[i]
-                    unique_points_dict[key] = value
-                for key in Xi_dict.keys():
-                    if key in unique_points_dict.keys():
-                        del unique_points_dict[key]
-                req_points = list(unique_points_dict.values())
+                n_Xi = len(Xi)
+                df_Xi = pd.DataFrame(data=Xi, columns=hps_names)
+                df_points = pd.DataFrame(data=unique_points, columns=hps_names)
+                df = pd.concat([df_Xi, df_points], ignore_index=True)
+                req_points = unique_points[(~df.duplicated(keep=False)).to_numpy()[n_Xi:]].tolist()
             else:
-                req_points = unique_points
+                req_points = unique_points.tolist()
 
             if len(req_points) > 0:
                 sel_req_points = random.choices(

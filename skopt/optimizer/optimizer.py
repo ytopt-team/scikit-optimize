@@ -462,7 +462,7 @@ class Optimizer(object):
             # this will not make a copy of `self.rng` and hence keep advancing
             # our random state.
             if self._initial_samples is None:
-                return self.space.rvs(random_state=self.rng)[0]
+                return self.space.rvs(Xi=self.Xi, random_state=self.rng)[0]
             else:
                 # The samples are evaluated starting form initial_samples[0]
                 return self._initial_samples[
@@ -538,7 +538,6 @@ class Optimizer(object):
 
         This method exists to give access to the internals of adding points
         by side stepping all input validation and transformation."""
-
         if "ps" in self.acq_func:
             if is_2Dlistlike(x):
                 self.Xi.extend(x)
