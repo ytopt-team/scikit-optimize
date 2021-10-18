@@ -1101,7 +1101,7 @@ class Space(object):
 
             # config space sampler wont give unique set of points; find unique
             points = pd.DataFrame(data=points, columns=hps_names)
-            unique_points = points[~points.duplicated(keep=False)].to_numpy()
+            unique_points = points[~points.duplicated(keep="first")].to_numpy()
 
             if Xi is not None:  # Computing unique points
                 n_Xi = len(Xi)
