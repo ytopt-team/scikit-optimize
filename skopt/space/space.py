@@ -1085,7 +1085,7 @@ class Space(object):
         rng = check_random_state(random_state)
         req_points = []
         if self.is_config_space:
-            confs = self.config_space.sample_configuration(1000)
+            confs = self.config_space.sample_configuration(n_samples)
             hps_names = self.config_space.get_hyperparameter_names()
             points = []
             for conf in confs:
