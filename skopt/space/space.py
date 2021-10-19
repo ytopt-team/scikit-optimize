@@ -1086,6 +1086,8 @@ class Space(object):
         req_points = []
         if self.is_config_space:
             confs = self.config_space.sample_configuration(n_samples)
+            if n_samples == 1:
+                confs = [confs]
             hps_names = self.config_space.get_hyperparameter_names()
             points = []
             for conf in confs:
