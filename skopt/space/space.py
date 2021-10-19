@@ -1,8 +1,6 @@
 import numbers
 import numpy as np
 import yaml
-import sys
-import random
 
 import pandas as pd
 
@@ -1115,10 +1113,7 @@ class Space(object):
                 req_points = unique_points.tolist()
 
             if len(req_points) > 0:
-                sel_req_points = random.choices(
-                    req_points, k=min(len(req_points), n_samples)
-                )
-                return sel_req_points
+                return req_points
             else:
                 return []
         else:
