@@ -30,8 +30,6 @@ from .transformers import ToInteger
 
 
 import ConfigSpace as CS
-import itertools
-from random import sample
 
 from sklearn.impute import SimpleImputer
 
@@ -1083,39 +1081,39 @@ class Space(object):
         rng = check_random_state(random_state)
         req_points = []
         if self.is_config_space:
-            confs = self.config_space.sample_configuration(n_samples)
-            if n_samples == 1:
-                confs = [confs]
-            hps_names = self.config_space.get_hyperparameter_names()
-            points = []
-            for conf in confs:
-                point = []
-                for hps_name in hps_names:
-                    val = np.nan
-                    if self.hps_type[hps_name] == "Categorical":
-                        val = "NA"
-                    if hps_name in conf.keys():
-                        val = conf[hps_name]
-                    point.append(val)
-                points.append(point)
 
-            # config space sampler wont give unique set of points; find unique
-            points = pd.DataFrame(data=points, columns=hps_names)
-            unique_points = points[~points.duplicated(keep="first")].to_numpy()
+            n_draw = max(100, n_samples)
+            n_try = 0
+            while len(req_points) < n_samples and n_try < 10:
 
-            if Xi is not None:  # Computing unique points
-                n_Xi = len(Xi)
-                df_Xi = pd.DataFrame(data=Xi, columns=hps_names)
-                df_points = pd.DataFrame(data=unique_points, columns=hps_names)
-                df = pd.concat([df_Xi, df_points], ignore_index=True)
-                req_points = unique_points[(~df.duplicated(keep=False)).to_numpy()[n_Xi:]].tolist()
-            else:
-                req_points = unique_points.tolist()
+                confs = self.config_space.sample_configuration(n_draw)
 
-            if len(req_points) > 0:
-                return req_points
-            else:
-                return []
+                hps_names = self.config_space.get_hyperparameter_names()
+                for conf in confs:
+                    point = []
+                    for hps_name in hps_names:
+                        val = np.nan
+                        if self.hps_type[hps_name] == "Categorical":
+                            val = "NA"
+                        if hps_name in conf.keys():
+                            val = conf[hps_name]
+                        point.append(val)
+                    req_points.append(point)
+
+                # config space sampler wont give unique set of points; find unique
+                df_req_points = pd.DataFrame(data=req_points, columns=hps_names)
+                df_req_points = df_req_points[~df_req_points.duplicated(keep="first")]
+
+                if Xi is not None:  # Computing unique points
+                    n_Xi = len(Xi)
+                    df_Xi = pd.DataFrame(data=Xi, columns=hps_names)
+                    df = pd.concat([df_Xi, df_req_points], ignore_index=True)
+                    df_req_points = df_req_points.iloc[(~df.duplicated(keep=False)).to_numpy()[n_Xi:]]
+
+                n_try += 1
+                req_points = df_req_points.values.tolist()
+
+            return req_points[:min(n_samples, len(req_points))]
         else:
             # Draw
             columns = []

@@ -30,11 +30,10 @@ from ..utils import cook_initial_point_generator
 
 
 class ExhaustedSearchSpace(RuntimeError):
-    """"Raised when the search cannot sample new points from the ConfigSpace.
-    """
+    """ "Raised when the search cannot sample new points from the ConfigSpace."""
 
     def __str__(self):
-        return f"The search space is exhausted and the search cannot sample new points!"
+        return f"The search space is exhausted and cannot sample new unique points!"
 
 
 class Optimizer(object):
@@ -170,19 +169,24 @@ class Optimizer(object):
 
     """
 
-    def __init__(self, dimensions, base_estimator="gp",
-                 n_random_starts=None, n_initial_points=10,
-                 initial_point_generator="random",
-                 n_jobs=1, acq_func="gp_hedge",
-                 acq_optimizer="auto",
-                 random_state=None,
-                 model_queue_size=None,
-                 acq_func_kwargs=None,
-                 acq_optimizer_kwargs=None):
+    def __init__(
+        self,
+        dimensions,
+        base_estimator="gp",
+        n_random_starts=None,
+        n_initial_points=10,
+        initial_point_generator="random",
+        n_jobs=1,
+        acq_func="gp_hedge",
+        acq_optimizer="auto",
+        random_state=None,
+        model_queue_size=None,
+        acq_func_kwargs=None,
+        acq_optimizer_kwargs=None,
+    ):
         args = locals().copy()
-        del args['self']
-        self.specs = {"args": args,
-                      "function": "Optimizer"}
+        del args["self"]
+        self.specs = {"args": args, "function": "Optimizer"}
         self.rng = check_random_state(random_state)
         self.converged = False
         # Configure acquisition function
@@ -231,9 +235,11 @@ class Optimizer(object):
         # build base_estimator if doesn't exist
         if isinstance(base_estimator, str):
             base_estimator = cook_estimator(
-                base_estimator, space=dimensions,
+                base_estimator,
+                space=dimensions,
                 random_state=self.rng.randint(0, np.iinfo(np.int32).max),
-                n_jobs=n_jobs)
+                n_jobs=n_jobs,
+            )
 
         # check if regressor
         if not is_regressor(base_estimator) and base_estimator is not None:
@@ -274,8 +280,7 @@ class Optimizer(object):
             acq_optimizer_kwargs = dict()
 
         self.n_points = acq_optimizer_kwargs.get("n_points", 10000)
-        self.n_restarts_optimizer = acq_optimizer_kwargs.get(
-            "n_restarts_optimizer", 5)
+        self.n_restarts_optimizer = acq_optimizer_kwargs.get("n_restarts_optimizer", 5)
         self.n_jobs = acq_optimizer_kwargs.get("n_jobs", 1)
         self.acq_optimizer_kwargs = acq_optimizer_kwargs
 
@@ -333,6 +338,9 @@ class Optimizer(object):
         # This ensures that multiple calls to `ask` with n_points set
         # return same sets of points. Reset to {} at every call to `tell`.
         self.cache_ = {}
+
+        # avoid duplicated samples
+        self.filter_duplicated = True
 
     def copy(self, random_state=None):
         """Create a shallow copy of an instance of the optimizer.
@@ -423,7 +431,11 @@ class Optimizer(object):
 
         X = []
         for i in range(n_points):
-            x = opt.ask()
+            try:
+                x = opt.ask()
+            except ExhaustedSearchSpace:
+                self.filter_duplicated = False
+                x = opt.ask()
             X.append(x)
 
             ti_available = "ps" in self.acq_func and len(opt.yi) > 0
@@ -462,7 +474,15 @@ class Optimizer(object):
             # this will not make a copy of `self.rng` and hence keep advancing
             # our random state.
             if self._initial_samples is None:
-                return self.space.rvs(Xi=self.Xi, random_state=self.rng)[0]
+                samples = self.space.rvs(
+                    n_samples=1,
+                    Xi=self.Xi if self.filter_duplicated else None,
+                    random_state=self.rng,
+                )
+                if len(samples) == 0:
+                    self.filter_duplicated = False
+                    samples = self.space.rvs(n_samples=1, random_state=self.rng)
+                return samples[0]
             else:
                 # The samples are evaluated starting form initial_samples[0]
                 return self._initial_samples[
@@ -591,7 +611,9 @@ class Optimizer(object):
             # even with BFGS as optimizer we want to sample a large number
             # of points and then pick the best ones as starting points
             X_s = self.space.rvs(
-                n_samples=self.n_points, Xi=self.Xi, random_state=self.rng
+                n_samples=self.n_points,
+                Xi=self.Xi if self.filter_duplicated else None,
+                random_state=self.rng,
             )
 
             if len(X_s) > 0:  # verify if new points are sampled
@@ -664,8 +686,7 @@ class Optimizer(object):
                 raise ExhaustedSearchSpace()
 
         # Pack results
-        result = create_result(self.Xi, self.yi, self.space, self.rng,
-                               models=self.models)
+        result = create_result(self.Xi, self.yi, self.space, self.rng, models=self.models)
 
         result.specs = self.specs
         return result
@@ -703,8 +724,7 @@ class Optimizer(object):
             x = self.ask()
             self.tell(x, func(x))
 
-        result = create_result(self.Xi, self.yi, self.space, self.rng,
-                               models=self.models)
+        result = create_result(self.Xi, self.yi, self.space, self.rng, models=self.models)
         result.specs = self.specs
         return result
 
@@ -728,7 +748,6 @@ class Optimizer(object):
             OptimizeResult instance with the required information.
 
         """
-        result = create_result(self.Xi, self.yi, self.space, self.rng,
-                               models=self.models)
+        result = create_result(self.Xi, self.yi, self.space, self.rng, models=self.models)
         result.specs = self.specs
         return result
