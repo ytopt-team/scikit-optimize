@@ -5,6 +5,7 @@ from numbers import Number
 
 import ConfigSpace as CS
 import numpy as np
+import pandas as pd
 
 from scipy.optimize import fmin_l_bfgs_b
 
@@ -188,7 +189,7 @@ class Optimizer(object):
         del args["self"]
         self.specs = {"args": args, "function": "Optimizer"}
         self.rng = check_random_state(random_state)
-        self.converged = False
+
         # Configure acquisition function
 
         # Store and creat acquisition function set
@@ -282,6 +283,7 @@ class Optimizer(object):
         self.n_points = acq_optimizer_kwargs.get("n_points", 10000)
         self.n_restarts_optimizer = acq_optimizer_kwargs.get("n_restarts_optimizer", 5)
         self.n_jobs = acq_optimizer_kwargs.get("n_jobs", 1)
+        self.filter_duplicated = acq_optimizer_kwargs.get("filter_duplicated", True)
         self.acq_optimizer_kwargs = acq_optimizer_kwargs
 
         # Configure search space
@@ -339,8 +341,7 @@ class Optimizer(object):
         # return same sets of points. Reset to {} at every call to `tell`.
         self.cache_ = {}
 
-        # avoid duplicated samples
-        self.filter_duplicated = True
+        self.sampled = []
 
     def copy(self, random_state=None):
         """Create a shallow copy of an instance of the optimizer.
@@ -365,6 +366,9 @@ class Optimizer(object):
             random_state=random_state,
         )
         optimizer._initial_samples = self._initial_samples
+
+        optimizer.sampled = self.sampled[:]
+
         if hasattr(self, "gains_"):
             optimizer.gains_ = np.copy(self.gains_)
         if self.Xi:
@@ -404,7 +408,9 @@ class Optimizer(object):
 
         """
         if n_points is None:
-            return self._ask()
+            x = self._ask()
+            self.sampled.append(x)
+            return x
 
         supported_strategies = ["cl_min", "cl_mean", "cl_max"]
 
@@ -426,17 +432,18 @@ class Optimizer(object):
 
         # Copy of the optimizer is made in order to manage the
         # deletion of points with "lie" objective (the copy of
-        # oiptimizer is simply discarded)
+        # optimizer is simply discarded)
         opt = self.copy(random_state=self.rng.randint(0, np.iinfo(np.int32).max))
 
         X = []
         for i in range(n_points):
-            try:
-                x = opt.ask()
-            except ExhaustedSearchSpace:
-                self.filter_duplicated = False
-                x = opt.ask()
+            x = opt.ask()
+            self.sampled.append(x)
             X.append(x)
+
+            # the optimizer copy `opt` is discarded anyway
+            if i == n_points - 1:
+                break
 
             ti_available = "ps" in self.acq_func and len(opt.yi) > 0
             ti = [t for (_, t) in opt.yi] if ti_available else None
@@ -463,6 +470,25 @@ class Optimizer(object):
 
         return X
 
+    def _filter_duplicated(self, samples):
+
+        if self.filter_duplicated:
+            # check duplicated values
+            hps_names = self.config_space.get_hyperparameter_names()
+            df_samples = pd.DataFrame(data=samples, columns=hps_names)
+            df_samples = df_samples[~df_samples.duplicated(keep="first")]
+
+            if len(self.sampled) > 0:
+                df_history = pd.DataFrame(data=self.sampled, columns=hps_names)
+                df_merge = pd.merge(df_samples, df_history, on=None, how="inner")
+                df_samples = df_samples.append(df_merge)
+                df_samples = df_samples[~df_samples.duplicated(keep=False)]
+
+            if  len(df_samples) > 0:
+                samples = df_samples.values.tolist()
+
+        return samples
+
     def _ask(self):
         """Suggest next point at which to evaluate the objective.
 
@@ -474,14 +500,10 @@ class Optimizer(object):
             # this will not make a copy of `self.rng` and hence keep advancing
             # our random state.
             if self._initial_samples is None:
-                samples = self.space.rvs(
-                    n_samples=1,
-                    Xi=self.Xi if self.filter_duplicated else None,
-                    random_state=self.rng,
-                )
-                if len(samples) == 0:
-                    self.filter_duplicated = False
-                    samples = self.space.rvs(n_samples=1, random_state=self.rng)
+                samples = self.space.rvs(n_samples=self.n_points, random_state=self.rng)
+
+                samples = self._filter_duplicated(samples)
+
                 return samples[0]
             else:
                 # The samples are evaluated starting form initial_samples[0]
@@ -534,7 +556,6 @@ class Optimizer(object):
             only be fitted after `n_initial_points` points have been told to
             the optimizer irrespective of the value of `fit`.
         """
-
         if self.space.is_config_space:
             pass
         else:
@@ -549,7 +570,6 @@ class Optimizer(object):
             elif is_listlike(x):
                 y = list(y)
                 y[1] = log(y[1])
-
         return self._tell(x, y, fit=fit)
 
     def _tell(self, x, y, fit=True):
@@ -610,80 +630,74 @@ class Optimizer(object):
 
             # even with BFGS as optimizer we want to sample a large number
             # of points and then pick the best ones as starting points
-            X_s = self.space.rvs(
-                n_samples=self.n_points,
-                Xi=self.Xi if self.filter_duplicated else None,
-                random_state=self.rng,
-            )
+            X_s = self.space.rvs(n_samples=self.n_points, random_state=self.rng)
 
-            if len(X_s) > 0:  # verify if new points are sampled
-                X = self.space.imp_const.fit_transform(self.space.transform(X_s))
-                self.next_xs_ = []
-                for cand_acq_func in self.cand_acq_funcs_:
-                    values = _gaussian_acquisition(
-                        X=X,
-                        model=est,
-                        y_opt=np.min(self.yi),
-                        acq_func=cand_acq_func,
-                        acq_func_kwargs=self.acq_func_kwargs,
-                    )
-                    # Find the minimum of the acquisition function by randomly
-                    # sampling points from the space
-                    if self.acq_optimizer == "sampling":
-                        next_x = X[np.argmin(values)]
+            X_s = self._filter_duplicated(X_s)
 
-                    # Use BFGS to find the mimimum of the acquisition function, the
-                    # minimization starts from `n_restarts_optimizer` different
-                    # points and the best minimum is used
-                    elif self.acq_optimizer == "lbfgs":
-                        x0 = X[np.argsort(values)[: self.n_restarts_optimizer]]
+            X = self.space.imp_const.fit_transform(self.space.transform(X_s))
+            self.next_xs_ = []
+            for cand_acq_func in self.cand_acq_funcs_:
+                values = _gaussian_acquisition(
+                    X=X,
+                    model=est,
+                    y_opt=np.min(self.yi),
+                    acq_func=cand_acq_func,
+                    acq_func_kwargs=self.acq_func_kwargs,
+                )
+                # Find the minimum of the acquisition function by randomly
+                # sampling points from the space
+                if self.acq_optimizer == "sampling":
+                    next_x = X[np.argmin(values)]
 
-                        with warnings.catch_warnings():
-                            warnings.simplefilter("ignore")
-                            results = Parallel(n_jobs=self.n_jobs)(
-                                delayed(fmin_l_bfgs_b)(
-                                    gaussian_acquisition_1D,
-                                    x,
-                                    args=(
-                                        est,
-                                        np.min(self.yi),
-                                        cand_acq_func,
-                                        self.acq_func_kwargs,
-                                    ),
-                                    bounds=self.space.transformed_bounds,
-                                    approx_grad=False,
-                                    maxiter=20,
-                                )
-                                for x in x0
+                # Use BFGS to find the mimimum of the acquisition function, the
+                # minimization starts from `n_restarts_optimizer` different
+                # points and the best minimum is used
+                elif self.acq_optimizer == "lbfgs":
+                    x0 = X[np.argsort(values)[: self.n_restarts_optimizer]]
+
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        results = Parallel(n_jobs=self.n_jobs)(
+                            delayed(fmin_l_bfgs_b)(
+                                gaussian_acquisition_1D,
+                                x,
+                                args=(
+                                    est,
+                                    np.min(self.yi),
+                                    cand_acq_func,
+                                    self.acq_func_kwargs,
+                                ),
+                                bounds=self.space.transformed_bounds,
+                                approx_grad=False,
+                                maxiter=20,
                             )
+                            for x in x0
+                        )
 
-                        cand_xs = np.array([r[0] for r in results])
-                        cand_acqs = np.array([r[1] for r in results])
-                        next_x = cand_xs[np.argmin(cand_acqs)]
+                    cand_xs = np.array([r[0] for r in results])
+                    cand_acqs = np.array([r[1] for r in results])
+                    next_x = cand_xs[np.argmin(cand_acqs)]
 
-                    # lbfgs should handle this but just in case there are
-                    # precision errors.
-                    if not self.space.is_categorical:
-                        if not self.space.is_config_space:
-                            next_x = np.clip(
-                                next_x, transformed_bounds[:, 0], transformed_bounds[:, 1]
-                            )
-                    self.next_xs_.append(next_x)
+                # lbfgs should handle this but just in case there are
+                # precision errors.
+                if not self.space.is_categorical:
+                    if not self.space.is_config_space:
+                        next_x = np.clip(
+                            next_x, transformed_bounds[:, 0], transformed_bounds[:, 1]
+                        )
+                self.next_xs_.append(next_x)
 
-                if self.acq_func == "gp_hedge":
-                    logits = np.array(self.gains_)
-                    logits -= np.max(logits)
-                    exp_logits = np.exp(self.eta * logits)
-                    probs = exp_logits / np.sum(exp_logits)
-                    next_x = self.next_xs_[np.argmax(self.rng.multinomial(1, probs))]
-                else:
-                    next_x = self.next_xs_[0]
-
-                # note the need for [0] at the end
-                self._next_x = self.space.inverse_transform(next_x.reshape((1, -1)))[0]
+            if self.acq_func == "gp_hedge":
+                logits = np.array(self.gains_)
+                logits -= np.max(logits)
+                exp_logits = np.exp(self.eta * logits)
+                probs = exp_logits / np.sum(exp_logits)
+                next_x = self.next_xs_[np.argmax(self.rng.multinomial(1, probs))]
             else:
-                self.converged = True
-                raise ExhaustedSearchSpace()
+                next_x = self.next_xs_[0]
+
+            # note the need for [0] at the end
+            self._next_x = self.space.inverse_transform(next_x.reshape((1, -1)))[0]
 
         # Pack results
         result = create_result(self.Xi, self.yi, self.space, self.rng, models=self.models)
