@@ -4,7 +4,13 @@ from math import log
 from numbers import Number
 
 import ConfigSpace as CS
-import cconfigspace as CCS
+ccs_active = False
+try:
+    import cconfigspace as CCS
+    ccs_active = True
+except ImportError as a:
+    warn("CCS could not be loaded and is deactivated: " + str(a), category=ImportWarning)
+
 import numpy as np
 import pandas as pd
 
@@ -295,7 +301,7 @@ class Optimizer(object):
 
             if isinstance(self.base_estimator_, GaussianProcessRegressor):
                 raise RuntimeError("GP estimator is not available with ConfigSpace!")
-        elif type(dimensions) is CCS.ConfigurationSpace:
+        elif ccs_active and isinstance(dimensions, CCS.ConfigurationSpace):
             self.ccs = dimensions
 
             if isinstance(self.base_estimator_, GaussianProcessRegressor):
