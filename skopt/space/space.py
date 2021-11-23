@@ -30,7 +30,12 @@ from .transformers import ToInteger
 
 import ConfigSpace as CS
 from ConfigSpace.util import deactivate_inactive_hyperparameters
-import cconfigspace as CCS
+ccs_active = False
+try:
+    import cconfigspace as CCS
+    ccs_active = True
+except ImportError as a:
+    warn("CCS could not be loaded and is deactivated: " + str(a), category=ImportWarning)
 
 from sklearn.impute import SimpleImputer
 
@@ -974,7 +979,7 @@ class Space(object):
                 else:
                     raise ValueError("Unknown Hyperparameter type.")
             dimensions = space
-        elif isinstance(dimensions, CCS.ConfigurationSpace):
+        elif ccs_active && isinstance(dimensions, CCS.ConfigurationSpace):
             self.is_ccs = True
             self.ccs = dimensions
             self.hps_type = {}
