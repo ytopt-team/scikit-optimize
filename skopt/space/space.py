@@ -979,7 +979,7 @@ class Space(object):
                 else:
                     raise ValueError("Unknown Hyperparameter type.")
             dimensions = space
-        elif ccs_active && isinstance(dimensions, CCS.ConfigurationSpace):
+        elif ccs_active & isinstance(dimensions, CCS.ConfigurationSpace):
             self.is_ccs = True
             self.ccs = dimensions
             self.hps_type = {}
