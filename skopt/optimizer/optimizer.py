@@ -8,7 +8,7 @@ ccs_active = False
 try:
     import cconfigspace as CCS
     ccs_active = True
-except ImportError as a:
+except (ImportError, OSError) as a:
     warnings.warn("CCS could not be loaded and is deactivated: " + str(a), category=ImportWarning)
 
 import numpy as np
