@@ -35,7 +35,8 @@ try:
     import cconfigspace as CCS
     ccs_active = True
 except ImportError as a:
-    warn("CCS could not be loaded and is deactivated: " + str(a), category=ImportWarning)
+    import warnings
+    warnings.warn("CCS could not be loaded and is deactivated: " + str(a), category=ImportWarning)
 
 from sklearn.impute import SimpleImputer
 
