@@ -2,8 +2,6 @@ import numbers
 import numpy as np
 import yaml
 
-import pandas as pd
-
 from scipy.stats.distributions import randint
 from scipy.stats.distributions import rv_discrete
 from scipy.stats.distributions import uniform, truncnorm
@@ -283,7 +281,7 @@ class Real(Dimension):
 
     """
     def __init__(self, low, high, prior="uniform", base=10, transform=None,
-                 name=None, dtype=float):
+                 name=None, dtype=float, loc=None, scale=None):
         if high <= low:
             raise ValueError("the lower bound {} has to be less than the"
                              " upper bound {}".format(low, high))
@@ -297,6 +295,8 @@ class Real(Dimension):
         self.log_base = np.log10(base)
         self.name = name
         self.dtype = dtype
+        self.loc = loc
+        self.scale = scale
         self._rvs = None
         self.transformer = None
         self.transform_ = transform

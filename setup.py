@@ -1,9 +1,9 @@
-import sys
 import os
+import sys
 from shutil import rmtree
 
 try:
-    from setuptools import setup, find_packages, Command
+    from setuptools import Command, setup
 except ImportError:
     from distutils.core import setup
 try:
@@ -24,19 +24,21 @@ import skopt
 
 VERSION = skopt.__version__
 
-CLASSIFIERS = ['Intended Audience :: Science/Research',
-               'Intended Audience :: Developers',
-               'License :: OSI Approved :: BSD License',
-               'Programming Language :: Python',
-               'Topic :: Software Development',
-               'Topic :: Scientific/Engineering',
-               'Operating System :: Microsoft :: Windows',
-               'Operating System :: POSIX',
-               'Operating System :: Unix',
-               'Operating System :: MacOS',
-               'Programming Language :: Python :: 3.6',
-               'Programming Language :: Python :: 3.7',
-               'Programming Language :: Python :: 3.8']
+CLASSIFIERS = [
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python",
+    "Topic :: Software Development",
+    "Topic :: Scientific/Engineering",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX",
+    "Operating System :: Unix",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+]
 
 
 class UploadCommand(Command):
@@ -128,31 +130,42 @@ class TestInstallCommand(Command):
 
     def run(self):
         self.status("Downloading the package from Test PyPI and installing it")
-        os.system("pip install --index-url https://test.pypi.org/simple/ dh-scikit-optimize")
+        os.system(
+            "pip install --index-url https://test.pypi.org/simple/ dh-scikit-optimize"
+        )
 
         sys.exit()
 
 
-setup(name='dh-scikit-optimize',
-      version=VERSION,
-      description='A Modified version of scikit-optimize a Sequential model-based optimization toolbox for DeepHyper.',
-      long_description=open('README.rst').read(),
-      url='https://scikit-optimize.github.io/',
-      license='BSD 3-clause',
-      author='The scikit-optimize contributors',
-      classifiers=CLASSIFIERS,
-      packages=['skopt', 'skopt.learning', 'skopt.optimizer', 'skopt.space',
-                'skopt.learning.gaussian_process', 'skopt.sampler'],
-      install_requires=['joblib>=0.11', 'pyaml>=16.9', 'numpy>=1.13.3',
-                        'scipy>=0.19.1',
-                        'scikit-learn>=0.20.0',
-                        'pandas'],
-      extras_require={
-        'plots':  ["matplotlib>=2.0.0"]
-        },
-      cmdclass={
+setup(
+    name="dh-scikit-optimize",
+    version=VERSION,
+    description="A Modified version of scikit-optimize a Sequential model-based optimization toolbox for DeepHyper.",
+    long_description=open("README.rst").read(),
+    url="https://scikit-optimize.github.io/",
+    license="BSD 3-clause",
+    author="The scikit-optimize contributors",
+    classifiers=CLASSIFIERS,
+    packages=[
+        "skopt",
+        "skopt.learning",
+        "skopt.optimizer",
+        "skopt.space",
+        "skopt.learning.gaussian_process",
+        "skopt.sampler",
+    ],
+    install_requires=[
+        "joblib>=0.11",
+        "pyaml>=16.9",
+        "numpy>=1.13.3",
+        "scipy>=0.19.1",
+        "scikit-learn>=0.20.0",
+        "pandas",
+    ],
+    extras_require={"plots": ["matplotlib>=2.0.0"]},
+    cmdclass={
         "upload": UploadCommand,
         "testupload": TestUploadCommand,
         "testinstall": TestInstallCommand,
-        },
-      )
+    },
+)

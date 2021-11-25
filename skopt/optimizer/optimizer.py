@@ -474,7 +474,12 @@ class Optimizer(object):
 
         if self.filter_duplicated:
             # check duplicated values
-            hps_names = self.config_space.get_hyperparameter_names()
+
+            if hasattr(self, "config_space"):
+                hps_names = self.config_space.get_hyperparameter_names()
+            else:
+                hps_names = self.space.dimension_names
+
             df_samples = pd.DataFrame(data=samples, columns=hps_names)
             df_samples = df_samples[~df_samples.duplicated(keep="first")]
 

@@ -1,17 +1,14 @@
-import numpy as np
 import warnings
 
-from scipy.linalg import cho_solve
-from scipy.linalg import solve_triangular
-
+import numpy as np
 import sklearn
-from sklearn.gaussian_process import GaussianProcessRegressor as sk_GaussianProcessRegressor
+from packaging import version
+from scipy.linalg import cho_solve, solve_triangular
+from sklearn.gaussian_process import \
+    GaussianProcessRegressor as sk_GaussianProcessRegressor
 from sklearn.utils import check_array
 
-from .kernels import ConstantKernel
-from .kernels import Sum
-from .kernels import RBF
-from .kernels import WhiteKernel
+from .kernels import RBF, ConstantKernel, Sum, WhiteKernel
 
 
 def _param_for_white_kernel_in_Sum(kernel, kernel_str=""):
@@ -224,10 +221,11 @@ class GaussianProcessRegressor(sk_GaussianProcessRegressor):
         self.K_inv_ = L_inv.dot(L_inv.T)
 
         # Fix deprecation warning #462
-        if int(sklearn.__version__[2:4]) >= 23:
+        sklearn_version = version.parse(sklearn.__version__)
+        if sklearn_version >= version.parse("0.23.0"):
             self.y_train_std_ = self._y_train_std
             self.y_train_mean_ = self._y_train_mean
-        elif int(sklearn.__version__[2:4]) >= 19:
+        elif sklearn_version >= version.parse("0.19.0"):
             self.y_train_mean_ = self._y_train_mean
             self.y_train_std_ = 1
         else:
