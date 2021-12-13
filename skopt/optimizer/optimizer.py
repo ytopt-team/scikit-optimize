@@ -291,6 +291,7 @@ class Optimizer(object):
         if type(dimensions) is CS.ConfigurationSpace:
             # Save the config space to do a real copy of the Optimizer
             self.config_space = dimensions
+            self.config_space.seed(self.rng.get_state()[1][0])
 
             if isinstance(self.base_estimator_, GaussianProcessRegressor):
                 raise RuntimeError("GP estimator is not available with ConfigSpace!")
