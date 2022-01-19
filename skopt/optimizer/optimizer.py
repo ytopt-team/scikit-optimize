@@ -656,7 +656,8 @@ class Optimizer(object):
                     next_x = X[np.argmin(values)]
 
                 elif self.acq_optimizer == "softmax_sampling":
-                    probs = values / np.sum(values)
+                    values = -values
+                    probs = np.exp(values) / np.sum(np.exp(values))
                     idx = np.argmax(self.rng.multinomial(1, probs))
                     next_x = X[idx]
 
