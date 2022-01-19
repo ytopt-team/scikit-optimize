@@ -262,17 +262,17 @@ class Optimizer(object):
             else:
                 acq_optimizer = "sampling"
 
-        if acq_optimizer not in ["lbfgs", "sampling"]:
+        if acq_optimizer not in ["lbfgs", "sampling", "softmax_sampling"]:
             raise ValueError(
                 "Expected acq_optimizer to be 'lbfgs' or "
-                "'sampling', got {0}".format(acq_optimizer)
+                "'sampling' or 'softmax_sampling', got {0}".format(acq_optimizer)
             )
 
-        if not has_gradients(self.base_estimator_) and acq_optimizer != "sampling":
+        if not has_gradients(self.base_estimator_) and not("sampling" in acq_optimizer):
             raise ValueError(
-                "The regressor {0} should run with "
-                "acq_optimizer"
-                "='sampling'.".format(type(base_estimator))
+                "The regressor {0} should run with a 'sampling' "
+                "acq_optimizer such as "
+                "'sampling' or 'softmax_sampling'.".format(type(base_estimator))
             )
         self.acq_optimizer = acq_optimizer
 
@@ -654,6 +654,11 @@ class Optimizer(object):
                 # sampling points from the space
                 if self.acq_optimizer == "sampling":
                     next_x = X[np.argmin(values)]
+
+                elif self.acq_optimizer == "softmax_sampling":
+                    probs = values / np.sum(values)
+                    idx = np.argmax(self.rng.multinomial(1, probs))
+                    next_x = X[idx]
 
                 # Use BFGS to find the mimimum of the acquisition function, the
                 # minimization starts from `n_restarts_optimizer` different

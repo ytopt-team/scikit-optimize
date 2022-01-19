@@ -19,3 +19,4 @@ doc/auto_examples
 
 # vim users
 .*.swp
+.vscode/settings.json
