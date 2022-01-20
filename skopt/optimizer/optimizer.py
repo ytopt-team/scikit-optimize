@@ -413,7 +413,7 @@ class Optimizer(object):
             self.sampled.append(x)
             return x
 
-        supported_strategies = ["cl_min", "cl_mean", "cl_max"]
+        supported_strategies = ["cl_min", "cl_mean", "cl_max", "topk", "softmax"]
 
         if not (isinstance(n_points, int) and n_points > 0):
             raise ValueError("n_points should be int > 0, got " + str(n_points))
@@ -425,6 +425,17 @@ class Optimizer(object):
                 + ", "
                 + "got %s" % strategy
             )
+
+        # handle one-shot strategies (topk, softmax)
+        if hasattr(self, "_last_X") and strategy == "topk":
+            idx = np.argsort(self._last_values)[:n_points]
+            return self._last_X[idx].tolist()
+
+        if hasattr(self, "_last_X") and strategy == "softmax":
+            values = -self._last_values
+            probs = np.exp(values) / np.sum(np.exp(values))
+            idx = np.argmax(self.rng.multinomial(1, probs, size=n_points), axis=1)
+            return self._last_X[idx].tolist()
 
         # Caching the result with n_points not None. If some new parameters
         # are provided to the ask, the cache_ is not used.
@@ -650,6 +661,11 @@ class Optimizer(object):
                     acq_func=cand_acq_func,
                     acq_func_kwargs=self.acq_func_kwargs,
                 )
+
+                # cache these values in case the strategy of ask is one-shot
+                self._last_X = X
+                self._last_values = values
+
                 # Find the minimum of the acquisition function by randomly
                 # sampling points from the space
                 if self.acq_optimizer == "sampling":
