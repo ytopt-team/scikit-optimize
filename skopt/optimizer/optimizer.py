@@ -37,6 +37,12 @@ class ExhaustedSearchSpace(RuntimeError):
         return f"The search space is exhausted and cannot sample new unique points!"
 
 
+def boltzman_distribution(x, beta=1):
+    x = np.exp(beta * x)
+    x = x / np.sum(x)
+    return x
+
+
 class Optimizer(object):
     """Run bayesian optimisation loop.
 
@@ -262,13 +268,15 @@ class Optimizer(object):
             else:
                 acq_optimizer = "sampling"
 
-        if acq_optimizer not in ["lbfgs", "sampling", "softmax_sampling"]:
+        if acq_optimizer not in ["lbfgs", "sampling", "boltzmann_sampling"]:
             raise ValueError(
                 "Expected acq_optimizer to be 'lbfgs' or "
                 "'sampling' or 'softmax_sampling', got {0}".format(acq_optimizer)
             )
 
-        if not has_gradients(self.base_estimator_) and not("sampling" in acq_optimizer):
+        if not has_gradients(self.base_estimator_) and not (
+            "sampling" in acq_optimizer
+        ):
             raise ValueError(
                 "The regressor {0} should run with a 'sampling' "
                 "acq_optimizer such as "
@@ -284,6 +292,7 @@ class Optimizer(object):
         self.n_restarts_optimizer = acq_optimizer_kwargs.get("n_restarts_optimizer", 5)
         self.n_jobs = acq_optimizer_kwargs.get("n_jobs", 1)
         self.filter_duplicated = acq_optimizer_kwargs.get("filter_duplicated", True)
+        self.boltzmann_gamma = acq_optimizer_kwargs.get("boltzmann_gamma", 10)
         self.acq_optimizer_kwargs = acq_optimizer_kwargs
 
         # Configure search space
@@ -342,7 +351,12 @@ class Optimizer(object):
         # return same sets of points. Reset to {} at every call to `tell`.
         self.cache_ = {}
 
+        # to avoid duplicated samples
         self.sampled = []
+
+        # for botlzmann strategy
+        self._min_value = 0
+        self._max_value = 0
 
     def copy(self, random_state=None):
         """Create a shallow copy of an instance of the optimizer.
@@ -413,7 +427,7 @@ class Optimizer(object):
             self.sampled.append(x)
             return x
 
-        supported_strategies = ["cl_min", "cl_mean", "cl_max", "topk", "softmax"]
+        supported_strategies = ["cl_min", "cl_mean", "cl_max", "topk", "boltzmann"]
 
         if not (isinstance(n_points, int) and n_points > 0):
             raise ValueError("n_points should be int > 0, got " + str(n_points))
@@ -429,12 +443,49 @@ class Optimizer(object):
         # handle one-shot strategies (topk, softmax)
         if hasattr(self, "_last_X") and strategy == "topk":
             idx = np.argsort(self._last_values)[:n_points]
-            return self._last_X[idx].tolist()
+            next_samples = self._last_X[idx].tolist()
 
-        if hasattr(self, "_last_X") and strategy == "softmax":
+            # to track sampled values and avoid duplicates
+            self.sampled.extend(next_samples)
+
+            return next_samples
+
+        if hasattr(self, "_last_X") and strategy == "boltzmann":
             values = -self._last_values
-            probs = np.exp(values) / np.sum(np.exp(values))
-            idx = np.argmax(self.rng.multinomial(1, probs, size=n_points), axis=1)
+
+            self._min_value = (
+                self._min_value
+                if self._min_value is None
+                else min(values.min(), self._min_value)
+            )
+            self._max_value = (
+                self._max_value
+                if self._max_value is None
+                else max(values.max(), self._max_value)
+            )
+
+            idx = []
+            max_trials = 100
+            trials = 0
+
+            while len(idx) < n_points:
+
+                t = len(self.sampled)
+                if t == 0:
+                    beta = 0
+                else:
+                    beta = self.boltzmann_gamma * np.log(t) / np.abs(self._max_value - self._min_value)
+                
+                probs = boltzman_distribution(values, beta)
+
+                new_idx = np.argmax(self.rng.multinomial(1, probs))
+
+                if self.filter_duplicated and new_idx in idx and trials < max_trials:
+                    trials += 1
+                else:
+                    idx.append(new_idx)
+                    self.sampled.append(self._last_X[new_idx].tolist())
+
             return self._last_X[idx].tolist()
 
         # Caching the result with n_points not None. If some new parameters
@@ -501,7 +552,7 @@ class Optimizer(object):
                 df_samples = df_samples.append(df_merge)
                 df_samples = df_samples[~df_samples.duplicated(keep=False)]
 
-            if  len(df_samples) > 0:
+            if len(df_samples) > 0:
                 samples = df_samples.values.tolist()
 
         return samples
@@ -537,7 +588,9 @@ class Optimizer(object):
             next_x = self._next_x
             if next_x is not None:
                 if not self.space.is_config_space:
-                    min_delta_x = min([self.space.distance(next_x, xi) for xi in self.Xi])
+                    min_delta_x = min(
+                        [self.space.distance(next_x, xi) for xi in self.Xi]
+                    )
                     if abs(min_delta_x) <= 1e-8:
                         warnings.warn(
                             "The objective has been evaluated " "at this point before."
@@ -671,10 +724,30 @@ class Optimizer(object):
                 if self.acq_optimizer == "sampling":
                     next_x = X[np.argmin(values)]
 
-                elif self.acq_optimizer == "softmax_sampling":
-                    values = -values
-                    probs = np.exp(values) / np.sum(np.exp(values))
+                elif self.acq_optimizer == "boltzmann_sampling":
+                    values = -self._last_values
+
+                    self._min_value = (
+                        self._min_value
+                        if self._min_value is None
+                        else min(values.min(), self._min_value)
+                    )
+                    self._max_value = (
+                        self._max_value
+                        if self._max_value is None
+                        else max(values.max(), self._max_value)
+                    )
+
+                    t = len(self.sampled)
+                    if t == 0:
+                        beta = 0
+                    else:
+                        beta = self.boltzmann_gamma * np.log(t) / np.abs(self._max_value - self._min_value)
+
+                    probs = boltzman_distribution(values, beta)
+
                     idx = np.argmax(self.rng.multinomial(1, probs))
+
                     next_x = X[idx]
 
                 # Use BFGS to find the mimimum of the acquisition function, the
@@ -728,7 +801,9 @@ class Optimizer(object):
             self._next_x = self.space.inverse_transform(next_x.reshape((1, -1)))[0]
 
         # Pack results
-        result = create_result(self.Xi, self.yi, self.space, self.rng, models=self.models)
+        result = create_result(
+            self.Xi, self.yi, self.space, self.rng, models=self.models
+        )
 
         result.specs = self.specs
         return result
@@ -766,7 +841,9 @@ class Optimizer(object):
             x = self.ask()
             self.tell(x, func(x))
 
-        result = create_result(self.Xi, self.yi, self.space, self.rng, models=self.models)
+        result = create_result(
+            self.Xi, self.yi, self.space, self.rng, models=self.models
+        )
         result.specs = self.specs
         return result
 
@@ -790,6 +867,8 @@ class Optimizer(object):
             OptimizeResult instance with the required information.
 
         """
-        result = create_result(self.Xi, self.yi, self.space, self.rng, models=self.models)
+        result = create_result(
+            self.Xi, self.yi, self.space, self.rng, models=self.models
+        )
         result.specs = self.specs
         return result
