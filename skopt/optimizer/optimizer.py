@@ -543,7 +543,7 @@ class Optimizer(object):
             else:
                 hps_names = self.space.dimension_names
 
-            df_samples = pd.DataFrame(data=samples, columns=hps_names)
+            df_samples = pd.DataFrame(data=samples, columns=hps_names, dtype='O')
             df_samples = df_samples[~df_samples.duplicated(keep="first")]
 
             if len(self.sampled) > 0:
