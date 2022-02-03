@@ -427,6 +427,11 @@ class Optimizer(object):
             self.sampled.append(x)
             return x
 
+        if n_points > 0 and (self._n_initial_points > 0 or self.base_estimator_ is None):
+            X = self._ask_random_points(size=n_points)
+            self.sampled.extend(X)
+            return X
+
         supported_strategies = ["cl_min", "cl_mean", "cl_max", "topk", "boltzmann"]
 
         if not (isinstance(n_points, int) and n_points > 0):
@@ -549,13 +554,23 @@ class Optimizer(object):
             if len(self.sampled) > 0:
                 df_history = pd.DataFrame(data=self.sampled, columns=hps_names)
                 df_merge = pd.merge(df_samples, df_history, on=None, how="inner")
-                df_samples = df_samples.append(df_merge)
+                df_samples = pd.concat([df_samples, df_merge])
                 df_samples = df_samples[~df_samples.duplicated(keep=False)]
 
             if len(df_samples) > 0:
                 samples = df_samples.values.tolist()
 
         return samples
+    
+    def _ask_random_points(self, size=None):
+        samples = self.space.rvs(n_samples=self.n_points, random_state=self.rng)
+
+        samples = self._filter_duplicated(samples)
+
+        if size is None:
+            return samples[0]
+        else:
+            return samples[:size]
 
     def _ask(self):
         """Suggest next point at which to evaluate the objective.
@@ -568,11 +583,7 @@ class Optimizer(object):
             # this will not make a copy of `self.rng` and hence keep advancing
             # our random state.
             if self._initial_samples is None:
-                samples = self.space.rvs(n_samples=self.n_points, random_state=self.rng)
-
-                samples = self._filter_duplicated(samples)
-
-                return samples[0]
+                return self._ask_random_points()
             else:
                 # The samples are evaluated starting form initial_samples[0]
                 return self._initial_samples[
