@@ -292,7 +292,7 @@ class Optimizer(object):
         self.n_restarts_optimizer = acq_optimizer_kwargs.get("n_restarts_optimizer", 5)
         self.n_jobs = acq_optimizer_kwargs.get("n_jobs", 1)
         self.filter_duplicated = acq_optimizer_kwargs.get("filter_duplicated", True)
-        self.boltzmann_gamma = acq_optimizer_kwargs.get("boltzmann_gamma", 10)
+        self.boltzmann_gamma = acq_optimizer_kwargs.get("boltzmann_gamma", 1)
         self.acq_optimizer_kwargs = acq_optimizer_kwargs
 
         # Configure search space
