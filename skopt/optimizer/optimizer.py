@@ -190,6 +190,7 @@ class Optimizer(object):
         model_queue_size=None,
         acq_func_kwargs=None,
         acq_optimizer_kwargs=None,
+        tl_sdv=None,
     ):
         args = locals().copy()
         del args["self"]
@@ -310,7 +311,7 @@ class Optimizer(object):
             if isinstance(self.base_estimator_, GaussianProcessRegressor):
                 dimensions = normalize_dimensions(dimensions)
 
-        self.space = Space(dimensions)
+        self.space = Space(dimensions, tl_sdv)
 
         self._initial_samples = None
         self._initial_point_generator = cook_initial_point_generator(
@@ -379,6 +380,7 @@ class Optimizer(object):
             acq_func_kwargs=self.acq_func_kwargs,
             acq_optimizer_kwargs=self.acq_optimizer_kwargs,
             random_state=random_state,
+            tl_sdv=self.tl_sdv,
         )
         optimizer._initial_samples = self._initial_samples
 

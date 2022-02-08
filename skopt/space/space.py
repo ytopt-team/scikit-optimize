@@ -1,6 +1,7 @@
 import numbers
 import numpy as np
 import yaml
+import sys
 
 from scipy.stats.distributions import randint
 from scipy.stats.distributions import rv_discrete
@@ -886,7 +887,7 @@ class Space(object):
             dimensions.
     """
 
-    def __init__(self, dimensions):
+    def __init__(self, dimensions, tl_sdv=None):
         self.is_config_space = False
         self.config_space_samples = None
         self.config_space_explored = False
@@ -897,6 +898,7 @@ class Space(object):
             missing_values=-1000, strategy="constant", fill_value=np.nan
         )
         self.hps_names = []
+        self.tl_sdv = tl_sdv
 
         if isinstance(dimensions, CS.ConfigurationSpace):
             self.is_config_space = True
@@ -1081,8 +1083,10 @@ class Space(object):
         rng = check_random_state(random_state)
         if self.is_config_space:
             req_points = []
-
-            confs = self.config_space.sample_configuration(n_samples)
+            if self.tl_sdv is None:
+                confs = self.config_space.sample_configuration(n_samples)
+            else:
+                confs = self.tl_sdv.sample(n_samples) # we have to check and fix this!
             if n_samples == 1:
                 confs = [confs]
 
@@ -1100,14 +1104,16 @@ class Space(object):
 
             return req_points
         else:
-            # Draw
-            columns = []
-
-            for dim in self.dimensions:
-                columns.append(dim.rvs(n_samples=n_samples, random_state=rng))
-
-            # Transpose
-            return _transpose_list_array(columns)
+            if self.tl_sdv is None:
+                # Draw
+                columns = []
+                for dim in self.dimensions:
+                    columns.append(dim.rvs(n_samples=n_samples, random_state=rng))
+                # Transpose
+                return _transpose_list_array(columns)
+            else:
+                confs = self.tl_sdv.sample(n_samples)
+                return confs.values
 
     def set_transformer(self, transform):
         """Sets the transformer of all dimension objects to `transform`
