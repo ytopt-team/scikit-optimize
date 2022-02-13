@@ -286,8 +286,8 @@ class Real(Dimension):
         if high <= low:
             raise ValueError("the lower bound {} has to be less than the"
                              " upper bound {}".format(low, high))
-        if prior not in ["uniform", "log-uniform"]:
-            raise ValueError("prior should be 'uniform' or 'log-uniform'"
+        if prior not in ["uniform", "log-uniform","normal"]:
+            raise ValueError("prior should be 'normal', 'uniform' or 'log-uniform'"
                              " got {}".format(prior))
         self.low = low
         self.high = high
@@ -1080,16 +1080,20 @@ class Space(object):
         points : list of lists, shape=(n_points, n_dims)
            Points sampled from the space.
         """
+        
         rng = check_random_state(random_state)
         if self.is_config_space:
             req_points = []
             if self.tl_sdv is None:
                 confs = self.config_space.sample_configuration(n_samples)
             else:
-                confs = self.tl_sdv.sample(n_samples) # we have to check and fix this!
+                confs_t = self.tl_sdv.sample(n_samples) # we have to check and fix this!
+                confs = confs_t.to_dict('records')
+                print('successfully sampling with tl_sdv! ')
+
             if n_samples == 1:
                 confs = [confs]
-
+            print(confs[0])
             hps_names = self.config_space.get_hyperparameter_names()
             for conf in confs:
                 point = []
@@ -1101,7 +1105,6 @@ class Space(object):
                         val = conf[hps_name]
                     point.append(val)
                 req_points.append(point)
-
             return req_points
         else:
             if self.tl_sdv is None:

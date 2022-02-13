@@ -196,6 +196,8 @@ class Optimizer(object):
         del args["self"]
         self.specs = {"args": args, "function": "Optimizer"}
         self.rng = check_random_state(random_state)
+        print(tl_sdv)
+        self.tl_sdv = tl_sdv
 
         # Configure acquisition function
 
@@ -380,11 +382,15 @@ class Optimizer(object):
             acq_func_kwargs=self.acq_func_kwargs,
             acq_optimizer_kwargs=self.acq_optimizer_kwargs,
             random_state=random_state,
-            tl_sdv=self.tl_sdv,
+            tl_sdv=self.tl_sdv
         )
+
         optimizer._initial_samples = self._initial_samples
 
         optimizer.sampled = self.sampled[:]
+
+        if hasattr(self, "tl_sdv"):
+            optimizer.tl_sdv = self.tl_sdv
 
         if hasattr(self, "gains_"):
             optimizer.gains_ = np.copy(self.gains_)
