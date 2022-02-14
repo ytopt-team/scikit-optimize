@@ -161,6 +161,9 @@ class Optimizer(object):
         Keeps list of models only as long as the argument given. In the
         case of None, the list has no capped length.
 
+    model_sdv : Model or None, default None
+        A Model from Synthetic-Data-Vault.
+
     Attributes
     ----------
     Xi : list
@@ -190,14 +193,12 @@ class Optimizer(object):
         model_queue_size=None,
         acq_func_kwargs=None,
         acq_optimizer_kwargs=None,
-        tl_sdv=None,
+        model_sdv=None,
     ):
         args = locals().copy()
         del args["self"]
         self.specs = {"args": args, "function": "Optimizer"}
         self.rng = check_random_state(random_state)
-        print(tl_sdv)
-        self.tl_sdv = tl_sdv
 
         # Configure acquisition function
 
@@ -313,7 +314,10 @@ class Optimizer(object):
             if isinstance(self.base_estimator_, GaussianProcessRegressor):
                 dimensions = normalize_dimensions(dimensions)
 
-        self.space = Space(dimensions, tl_sdv)
+        # keep track of the generative model from sdv
+        self.model_sdv = model_sdv
+
+        self.space = Space(dimensions, model_sdv=self.model_sdv)
 
         self._initial_samples = None
         self._initial_point_generator = cook_initial_point_generator(
@@ -382,15 +386,16 @@ class Optimizer(object):
             acq_func_kwargs=self.acq_func_kwargs,
             acq_optimizer_kwargs=self.acq_optimizer_kwargs,
             random_state=random_state,
-            tl_sdv=self.tl_sdv
+            model_sdv=self.model_sdv
         )
 
         optimizer._initial_samples = self._initial_samples
 
         optimizer.sampled = self.sampled[:]
 
-        if hasattr(self, "tl_sdv"):
-            optimizer.tl_sdv = self.tl_sdv
+        # TODO: commented because possibly not necessary
+        # if hasattr(self, "tl_sdv"):
+        #     optimizer.model_sdv = self.model_sdv
 
         if hasattr(self, "gains_"):
             optimizer.gains_ = np.copy(self.gains_)

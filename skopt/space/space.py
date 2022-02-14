@@ -888,18 +888,24 @@ class Space(object):
             dimensions.
     """
 
-    def __init__(self, dimensions, tl_sdv=None):
+    def __init__(self, dimensions, model_sdv=None):
+
+        # attributes used when a ConfigurationSpace from ConfigSpace is given
         self.is_config_space = False
         self.config_space_samples = None
         self.config_space_explored = False
+
         self.imp_const = SimpleImputer(
             missing_values=np.nan, strategy="constant", fill_value=-1000
         )
         self.imp_const_inv = SimpleImputer(
             missing_values=-1000, strategy="constant", fill_value=np.nan
         )
+        
+        # attribute used when a generative model is used to sample
+        self.model_sdv = model_sdv
+
         self.hps_names = []
-        self.tl_sdv = tl_sdv
 
         if isinstance(dimensions, CS.ConfigurationSpace):
             self.is_config_space = True
@@ -1082,57 +1088,50 @@ class Space(object):
            Points sampled from the space.
         """
         
-        #n_samples = 100
-
         rng = check_random_state(random_state)
         if self.is_config_space:
             req_points = []
-            if self.tl_sdv is None:
-                confs = self.config_space.sample_configuration(n_samples)
-            else:
-                confs = self.tl_sdv.sample(n_samples) 
-                print('successfully sampling with tl_sdv! ')
-
-            if n_samples == 1:
-                confs = [confs]
-            
-            #print(confs)
 
             hps_names = self.config_space.get_hyperparameter_names()
-            sdv_names = confs.columns
             
-            new_hps_names = list(set(hps_names)-set(sdv_names))
-            #print(new_hps_names)
+            if self.model_sdv is None:
+                confs = self.config_space.sample_configuration(n_samples)
 
-            rs = np.random.RandomState()
+                if n_samples == 1:
+                    confs = [confs]
+            else:
+                confs = self.model_sdv.sample(n_samples) 
+            
+                sdv_names = confs.columns
+                
+                new_hps_names = list(set(hps_names)-set(sdv_names))
 
-            # randomly sample the new hyperparameters
-            for name in new_hps_names:
-                hp = self.config_space.get_hyperparameter(name)
-                rvs = []
-                for i in range(n_samples):
-                    v = hp._sample(rs)
-                    rv = hp._transform(v)
-                    rvs.append(rv)
-                confs[name] = rvs 
+                # randomly sample the new hyperparameters
+                for name in new_hps_names:
+                    hp = self.config_space.get_hyperparameter(name)
+                    rvs = []
+                    for i in range(n_samples):
+                        v = hp._sample(rng)
+                        rv = hp._transform(v)
+                        rvs.append(rv)
+                    confs[name] = rvs 
 
-            # reoder the column names
-            confs = confs[hps_names]
-            #print(confs)
+                # reoder the column names
+                confs = confs[hps_names]
 
-            confs = confs.to_dict('records')
-            for idx, conf in enumerate(confs):
-                cf = deactivate_inactive_hyperparameters(conf,self.config_space)
-                confs[idx] = cf.get_dictionary()
+                confs = confs.to_dict('records')
+                for idx, conf in enumerate(confs):
+                    cf = deactivate_inactive_hyperparameters(conf,self.config_space)
+                    confs[idx] = cf.get_dictionary()
 
-                # check if other conditions are not met; generate valid 1-exchange neighbor; need to test and develop the logic 
-                if 0:
-                    print('conf invalid...generating valid 1-exchange neighbor')
-                    neighborhood = get_one_exchange_neighbourhood(cf,1)
-                    for new_config in neighborhood:
-                        print(new_config)
-                        print(new_config.is_valid_configuration())
-                        confs[idx] = new_config.get_dictionary()
+                    # TODO: remove because debug instructions
+                    # check if other conditions are not met; generate valid 1-exchange neighbor; need to test and develop the logic 
+                    # print('conf invalid...generating valid 1-exchange neighbor')
+                    # neighborhood = get_one_exchange_neighbourhood(cf,1)
+                    # for new_config in neighborhood:
+                    #     print(new_config)
+                    #     print(new_config.is_valid_configuration())
+                    #     confs[idx] = new_config.get_dictionary()
 
             for idx, conf in enumerate(confs):
                 point = []
@@ -1144,19 +1143,19 @@ class Space(object):
                         val = conf[hps_name]
                     point.append(val)
                 req_points.append(point)
-            #print(req_points[0])
 
             return req_points
         else:
-            if self.tl_sdv is None:
+            if self.model_sdv is None:
                 # Draw
                 columns = []
                 for dim in self.dimensions:
                     columns.append(dim.rvs(n_samples=n_samples, random_state=rng))
+
                 # Transpose
                 return _transpose_list_array(columns)
             else:
-                confs = self.tl_sdv.sample(n_samples)
+                confs = self.model_sdv.sample(n_samples)
                 return confs.values
 
     def set_transformer(self, transform):
