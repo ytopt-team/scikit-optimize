@@ -749,7 +749,7 @@ class Optimizer(object):
                     next_x = X[np.argmin(values)]
 
                 elif self.acq_optimizer == "boltzmann_sampling":
-                    values = -self._last_values
+                    values = -values
 
                     self._min_value = (
                         self._min_value
@@ -762,7 +762,7 @@ class Optimizer(object):
                         else max(values.max(), self._max_value)
                     )
 
-                    t = len(self.sampled)
+                    t = len(self.Xi)
                     if t == 0:
                         beta = 0
                     else:
