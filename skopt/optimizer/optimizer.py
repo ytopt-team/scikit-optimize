@@ -469,7 +469,7 @@ class Optimizer(object):
                 else max(values.max(), self._max_value)
             )
 
-            idx = []
+            idx = [np.argmax(values)]
             max_trials = 100
             trials = 0
 
