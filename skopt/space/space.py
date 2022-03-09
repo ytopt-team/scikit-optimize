@@ -9,7 +9,6 @@ from scipy.stats.distributions import uniform, truncnorm
 
 from sklearn.utils import check_random_state
 from sklearn.utils.fixes import sp_version
-from ConfigSpace.util import get_one_exchange_neighbourhood, get_random_neighbor, deactivate_inactive_hyperparameters
 
 
 if type(sp_version) is not tuple:  # Version object since sklearn>=2.3.x
@@ -30,6 +29,7 @@ from .transformers import ToInteger
 
 
 import ConfigSpace as CS
+from ConfigSpace.util import deactivate_inactive_hyperparameters
 
 from sklearn.impute import SimpleImputer
 

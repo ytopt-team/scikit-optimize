@@ -393,10 +393,6 @@ class Optimizer(object):
 
         optimizer.sampled = self.sampled[:]
 
-        # TODO: commented because possibly not necessary
-        # if hasattr(self, "tl_sdv"):
-        #     optimizer.model_sdv = self.model_sdv
-
         if hasattr(self, "gains_"):
             optimizer.gains_ = np.copy(self.gains_)
         if self.Xi:
@@ -482,7 +478,7 @@ class Optimizer(object):
                 else max(values.max(), self._max_value)
             )
 
-            idx = []
+            idx = [np.argmax(values)]
             max_trials = 100
             trials = 0
 
