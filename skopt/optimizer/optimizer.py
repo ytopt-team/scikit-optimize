@@ -598,9 +598,10 @@ class Optimizer(object):
             if self.filter_failures == "mean":
                 yi_failed_value = np.mean(yi_no_failure)
             else:
-                yi_failed_value = np.min(yi_no_failure)
-
+                yi_failed_value = np.max(yi_no_failure)
+            
             yi = [v if v != OBJECTIVE_VALUE_FAILURE else yi_failed_value for v in yi]
+
         return yi
 
     def _ask_random_points(self, size=None):
@@ -778,7 +779,7 @@ class Optimizer(object):
                 # sampling points from the space
                 if self.acq_optimizer == "sampling":
                     next_x = X[np.argmin(values)]
-
+                
                 elif self.acq_optimizer == "boltzmann_sampling":
 
                     p = self.rng.uniform()
