@@ -17,6 +17,7 @@ from sklearn.utils import check_random_state
 
 from ..acquisition import _gaussian_acquisition
 from ..acquisition import gaussian_acquisition_1D
+from ..acquisition import gaussian_lcb
 from ..learning import GaussianProcessRegressor
 from ..space import Categorical
 from ..space import Space
@@ -205,7 +206,7 @@ class Optimizer(object):
         self.acq_func = acq_func
         self.acq_func_kwargs = acq_func_kwargs
 
-        allowed_acq_funcs = ["gp_hedge", "EI", "LCB", "PI", "EIps", "PIps"]
+        allowed_acq_funcs = ["gp_hedge", "EI", "LCB", "qLCB", "PI", "EIps", "PIps"]
         if self.acq_func not in allowed_acq_funcs:
             raise ValueError(
                 "expected acq_func to be in %s, got %s"
@@ -439,7 +440,10 @@ class Optimizer(object):
             self.sampled.extend(X)
             return X
 
-        supported_strategies = ["cl_min", "cl_mean", "cl_max", "topk", "boltzmann"]
+        if self.acq_func == "qLCB":
+            strategy = "qLCB"
+
+        supported_strategies = ["cl_min", "cl_mean", "cl_max", "topk", "boltzmann", "qLCB"]
 
         if not (isinstance(n_points, int) and n_points > 0):
             raise ValueError("n_points should be int > 0, got " + str(n_points))
@@ -503,6 +507,20 @@ class Optimizer(object):
                     self.sampled.append(self._last_X[new_idx].tolist())
 
             return self._last_X[idx].tolist()
+        
+        if hasattr(self, "_est") and self.acq_func == "qLCB":
+            X_s = self.space.rvs(n_samples=self.n_points, random_state=self.rng)
+            X_s = self._filter_duplicated(X_s)
+            X_c = self.space.imp_const.fit_transform(self.space.transform(X_s)) # candidates
+            mu, std = self._est.predict(X_c, return_std=True)
+            kappa = self.acq_func_kwargs.get("kappa", 1.96)
+            kappas = self.rng.exponential(kappa, size=n_points)
+            X = []
+            for kappa in kappas:
+                values = mu - kappa * std
+                idx = np.argmin(values)
+                X.append(X_s[idx])
+            return X
 
         # Caching the result with n_points not None. If some new parameters
         # are provided to the ask, the cache_ is not used.
@@ -742,128 +760,132 @@ class Optimizer(object):
                 Xtt = self.space.imp_const.fit_transform(self.space.transform(self.Xi))
                 est.fit(Xtt, yi)
 
-            if hasattr(self, "next_xs_") and self.acq_func == "gp_hedge":
-                self.gains_ -= est.predict(np.vstack(self.next_xs_))
-
-            if self.max_model_queue_size is None:
-                self.models.append(est)
-            elif len(self.models) < self.max_model_queue_size:
-                self.models.append(est)
+            # for qLCB save the fitted estimator and skip the selection
+            if self.acq_func == "qLCB":
+                self._est = est
             else:
-                # Maximum list size obtained, remove oldest model.
-                self.models.pop(0)
-                self.models.append(est)
+                if hasattr(self, "next_xs_") and self.acq_func == "gp_hedge":
+                    self.gains_ -= est.predict(np.vstack(self.next_xs_))
 
-            # even with BFGS as optimizer we want to sample a large number
-            # of points and then pick the best ones as starting points
-            X_s = self.space.rvs(n_samples=self.n_points, random_state=self.rng)
+                if self.max_model_queue_size is None:
+                    self.models.append(est)
+                elif len(self.models) < self.max_model_queue_size:
+                    self.models.append(est)
+                else:
+                    # Maximum list size obtained, remove oldest model.
+                    self.models.pop(0)
+                    self.models.append(est)
 
-            X_s = self._filter_duplicated(X_s)
+                # even with BFGS as optimizer we want to sample a large number
+                # of points and then pick the best ones as starting points
+                X_s = self.space.rvs(n_samples=self.n_points, random_state=self.rng)
 
-            X = self.space.imp_const.fit_transform(self.space.transform(X_s))
-            self.next_xs_ = []
-            for cand_acq_func in self.cand_acq_funcs_:
-                values = _gaussian_acquisition(
-                    X=X,
-                    model=est,
-                    y_opt=np.min(yi),
-                    acq_func=cand_acq_func,
-                    acq_func_kwargs=self.acq_func_kwargs,
-                )
+                X_s = self._filter_duplicated(X_s)
 
-                # cache these values in case the strategy of ask is one-shot
-                self._last_X = X
-                self._last_values = values
+                X = self.space.imp_const.fit_transform(self.space.transform(X_s))
+                self.next_xs_ = []
+                for cand_acq_func in self.cand_acq_funcs_:
+                    values = _gaussian_acquisition(
+                        X=X,
+                        model=est,
+                        y_opt=np.min(yi),
+                        acq_func=cand_acq_func,
+                        acq_func_kwargs=self.acq_func_kwargs,
+                    )
 
-                # Find the minimum of the acquisition function by randomly
-                # sampling points from the space
-                if self.acq_optimizer == "sampling":
-                    next_x = X[np.argmin(values)]
-                
-                elif self.acq_optimizer == "boltzmann_sampling":
+                    # cache these values in case the strategy of ask is one-shot
+                    self._last_X = X
+                    self._last_values = values
 
-                    p = self.rng.uniform()
-                    if p <= self.boltzmann_psucc:
+                    # Find the minimum of the acquisition function by randomly
+                    # sampling points from the space
+                    if self.acq_optimizer == "sampling":
                         next_x = X[np.argmin(values)]
-                    else:
-                        values = -values
+                    
+                    elif self.acq_optimizer == "boltzmann_sampling":
 
-                        self._min_value = (
-                            self._min_value
-                            if self._min_value is None
-                            else min(values.min(), self._min_value)
-                        )
-                        self._max_value = (
-                            self._max_value
-                            if self._max_value is None
-                            else max(values.max(), self._max_value)
-                        )
-
-                        t = len(self.Xi)
-                        if t == 0:
-                            beta = 0
+                        p = self.rng.uniform()
+                        if p <= self.boltzmann_psucc:
+                            next_x = X[np.argmin(values)]
                         else:
-                            beta = (
-                                self.boltzmann_gamma
-                                * np.log(t)
-                                / np.abs(self._max_value - self._min_value)
+                            values = -values
+
+                            self._min_value = (
+                                self._min_value
+                                if self._min_value is None
+                                else min(values.min(), self._min_value)
+                            )
+                            self._max_value = (
+                                self._max_value
+                                if self._max_value is None
+                                else max(values.max(), self._max_value)
                             )
 
-                        probs = boltzman_distribution(values, beta)
+                            t = len(self.Xi)
+                            if t == 0:
+                                beta = 0
+                            else:
+                                beta = (
+                                    self.boltzmann_gamma
+                                    * np.log(t)
+                                    / np.abs(self._max_value - self._min_value)
+                                )
 
-                        idx = np.argmax(self.rng.multinomial(1, probs))
+                            probs = boltzman_distribution(values, beta)
 
-                        next_x = X[idx]
+                            idx = np.argmax(self.rng.multinomial(1, probs))
 
-                # Use BFGS to find the mimimum of the acquisition function, the
-                # minimization starts from `n_restarts_optimizer` different
-                # points and the best minimum is used
-                elif self.acq_optimizer == "lbfgs":
-                    x0 = X[np.argsort(values)[: self.n_restarts_optimizer]]
+                            next_x = X[idx]
 
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("ignore")
-                        results = Parallel(n_jobs=self.n_jobs)(
-                            delayed(fmin_l_bfgs_b)(
-                                gaussian_acquisition_1D,
-                                x,
-                                args=(
-                                    est,
-                                    np.min(yi),
-                                    cand_acq_func,
-                                    self.acq_func_kwargs,
-                                ),
-                                bounds=self.space.transformed_bounds,
-                                approx_grad=False,
-                                maxiter=20,
+                    # Use BFGS to find the mimimum of the acquisition function, the
+                    # minimization starts from `n_restarts_optimizer` different
+                    # points and the best minimum is used
+                    elif self.acq_optimizer == "lbfgs":
+                        x0 = X[np.argsort(values)[: self.n_restarts_optimizer]]
+
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            results = Parallel(n_jobs=self.n_jobs)(
+                                delayed(fmin_l_bfgs_b)(
+                                    gaussian_acquisition_1D,
+                                    x,
+                                    args=(
+                                        est,
+                                        np.min(yi),
+                                        cand_acq_func,
+                                        self.acq_func_kwargs,
+                                    ),
+                                    bounds=self.space.transformed_bounds,
+                                    approx_grad=False,
+                                    maxiter=20,
+                                )
+                                for x in x0
                             )
-                            for x in x0
-                        )
 
-                    cand_xs = np.array([r[0] for r in results])
-                    cand_acqs = np.array([r[1] for r in results])
-                    next_x = cand_xs[np.argmin(cand_acqs)]
+                        cand_xs = np.array([r[0] for r in results])
+                        cand_acqs = np.array([r[1] for r in results])
+                        next_x = cand_xs[np.argmin(cand_acqs)]
 
-                # lbfgs should handle this but just in case there are
-                # precision errors.
-                if not self.space.is_categorical:
-                    if not self.space.is_config_space:
-                        next_x = np.clip(
-                            next_x, transformed_bounds[:, 0], transformed_bounds[:, 1]
-                        )
-                self.next_xs_.append(next_x)
+                    # lbfgs should handle this but just in case there are
+                    # precision errors.
+                    if not self.space.is_categorical:
+                        if not self.space.is_config_space:
+                            next_x = np.clip(
+                                next_x, transformed_bounds[:, 0], transformed_bounds[:, 1]
+                            )
+                    self.next_xs_.append(next_x)
 
-            if self.acq_func == "gp_hedge":
-                logits = np.array(self.gains_)
-                logits -= np.max(logits)
-                exp_logits = np.exp(self.eta * logits)
-                probs = exp_logits / np.sum(exp_logits)
-                next_x = self.next_xs_[np.argmax(self.rng.multinomial(1, probs))]
-            else:
-                next_x = self.next_xs_[0]
+                if self.acq_func == "gp_hedge":
+                    logits = np.array(self.gains_)
+                    logits -= np.max(logits)
+                    exp_logits = np.exp(self.eta * logits)
+                    probs = exp_logits / np.sum(exp_logits)
+                    next_x = self.next_xs_[np.argmax(self.rng.multinomial(1, probs))]
+                else:
+                    next_x = self.next_xs_[0]
 
-            # note the need for [0] at the end
-            self._next_x = self.space.inverse_transform(next_x.reshape((1, -1)))[0]
+                # note the need for [0] at the end
+                self._next_x = self.space.inverse_transform(next_x.reshape((1, -1)))[0]
 
         # Pack results
         result = create_result(
