@@ -840,7 +840,11 @@ class Categorical(Dimension):
     @property
     def transformed_bounds(self):
         if self.transformed_size == 1:
-            return 0.0, 1.0
+            N = len(self.categories)
+            if self.transform_ == "label":
+                return 0.0, float(N-1)
+            else:
+                return 0.0, 1.0
         else:
             return [(0.0, 1.0) for i in range(self.transformed_size)]
 

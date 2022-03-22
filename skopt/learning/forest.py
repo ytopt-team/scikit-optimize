@@ -494,7 +494,7 @@ class ExtraTreesRegressor(_sk_ExtraTreesRegressor):
                 raise ValueError(
                     "Expected impurity to be 'squared_error', got %s instead"
                     % self.criterion)
-            std = _return_std(X, self.estimators_, mean, self.min_variance)
+            std = _return_std(X, self.n_outputs_, self.estimators_, mean, self.min_variance)
             return mean, std
 
         return mean

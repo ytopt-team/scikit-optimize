@@ -17,6 +17,7 @@ from sklearn.utils import check_random_state
 
 from ..acquisition import _gaussian_acquisition
 from ..acquisition import gaussian_acquisition_1D
+from ..acquisition import gaussian_lcb
 from ..learning import GaussianProcessRegressor
 from ..space import Categorical
 from ..space import Space
@@ -41,6 +42,9 @@ def boltzman_distribution(x, beta=1):
     x = np.exp(beta * x)
     x = x / np.sum(x)
     return x
+
+
+OBJECTIVE_VALUE_FAILURE = "F"
 
 
 class Optimizer(object):
@@ -206,7 +210,7 @@ class Optimizer(object):
         self.acq_func = acq_func
         self.acq_func_kwargs = acq_func_kwargs
 
-        allowed_acq_funcs = ["gp_hedge", "EI", "LCB", "PI", "EIps", "PIps"]
+        allowed_acq_funcs = ["gp_hedge", "EI", "LCB", "qLCB", "PI", "EIps", "PIps"]
         if self.acq_func not in allowed_acq_funcs:
             raise ValueError(
                 "expected acq_func to be in %s, got %s"
@@ -297,6 +301,8 @@ class Optimizer(object):
         self.n_jobs = acq_optimizer_kwargs.get("n_jobs", 1)
         self.filter_duplicated = acq_optimizer_kwargs.get("filter_duplicated", True)
         self.boltzmann_gamma = acq_optimizer_kwargs.get("boltzmann_gamma", 1)
+        self.boltzmann_psucc = acq_optimizer_kwargs.get("boltzmann_psucc", 0)
+        self.filter_failures = acq_optimizer_kwargs.get("filter_failures", "mean")
         self.acq_optimizer_kwargs = acq_optimizer_kwargs
 
         # Configure search space
@@ -436,12 +442,17 @@ class Optimizer(object):
             self.sampled.append(x)
             return x
 
-        if n_points > 0 and (self._n_initial_points > 0 or self.base_estimator_ is None):
+        if n_points > 0 and (
+            self._n_initial_points > 0 or self.base_estimator_ is None
+        ):
             X = self._ask_random_points(size=n_points)
             self.sampled.extend(X)
             return X
 
-        supported_strategies = ["cl_min", "cl_mean", "cl_max", "topk", "boltzmann"]
+        if self.acq_func == "qLCB":
+            strategy = "qLCB"
+
+        supported_strategies = ["cl_min", "cl_mean", "cl_max", "topk", "boltzmann", "qLCB"]
 
         if not (isinstance(n_points, int) and n_points > 0):
             raise ValueError("n_points should be int > 0, got " + str(n_points))
@@ -488,8 +499,12 @@ class Optimizer(object):
                 if t == 0:
                     beta = 0
                 else:
-                    beta = self.boltzmann_gamma * np.log(t) / np.abs(self._max_value - self._min_value)
-                
+                    beta = (
+                        self.boltzmann_gamma
+                        * np.log(t)
+                        / np.abs(self._max_value - self._min_value)
+                    )
+
                 probs = boltzman_distribution(values, beta)
 
                 new_idx = np.argmax(self.rng.multinomial(1, probs))
@@ -501,6 +516,20 @@ class Optimizer(object):
                     self.sampled.append(self._last_X[new_idx].tolist())
 
             return self._last_X[idx].tolist()
+        
+        if hasattr(self, "_est") and self.acq_func == "qLCB":
+            X_s = self.space.rvs(n_samples=self.n_points, random_state=self.rng)
+            X_s = self._filter_duplicated(X_s)
+            X_c = self.space.imp_const.fit_transform(self.space.transform(X_s)) # candidates
+            mu, std = self._est.predict(X_c, return_std=True)
+            kappa = self.acq_func_kwargs.get("kappa", 1.96)
+            kappas = self.rng.exponential(kappa, size=n_points)
+            X = []
+            for kappa in kappas:
+                values = mu - kappa * std
+                idx = np.argmin(values)
+                X.append(X_s[idx])
+            return X
 
         # Caching the result with n_points not None. If some new parameters
         # are provided to the ask, the cache_ is not used.
@@ -525,14 +554,16 @@ class Optimizer(object):
             ti_available = "ps" in self.acq_func and len(opt.yi) > 0
             ti = [t for (_, t) in opt.yi] if ti_available else None
 
+            opt_yi = self._filter_failures(opt.yi)
+
             if strategy == "cl_min":
-                y_lie = np.min(opt.yi) if opt.yi else 0.0  # CL-min lie
+                y_lie = np.min(opt_yi) if opt_yi else 0.0  # CL-min lie
                 t_lie = np.min(ti) if ti is not None else log(sys.float_info.max)
             elif strategy == "cl_mean":
-                y_lie = np.mean(opt.yi) if opt.yi else 0.0  # CL-mean lie
+                y_lie = np.mean(opt_yi) if opt_yi else 0.0  # CL-mean lie
                 t_lie = np.mean(ti) if ti is not None else log(sys.float_info.max)
             else:
-                y_lie = np.max(opt.yi) if opt.yi else 0.0  # CL-max lie
+                y_lie = np.max(opt_yi) if opt_yi else 0.0  # CL-max lie
                 t_lie = np.max(ti) if ti is not None else log(sys.float_info.max)
 
             # Lie to the optimizer.
@@ -548,6 +579,14 @@ class Optimizer(object):
         return X
 
     def _filter_duplicated(self, samples):
+        """Filter out duplicated values in ``samples``.
+
+        Args:
+            samples (list): the list of samples to filter.
+
+        Returns:
+            list: the filtered list of samples
+        """
 
         if self.filter_duplicated:
             # check duplicated values
@@ -557,7 +596,7 @@ class Optimizer(object):
             else:
                 hps_names = self.space.dimension_names
 
-            df_samples = pd.DataFrame(data=samples, columns=hps_names, dtype='O')
+            df_samples = pd.DataFrame(data=samples, columns=hps_names, dtype="O")
             df_samples = df_samples[~df_samples.duplicated(keep="first")]
 
             if len(self.sampled) > 0:
@@ -570,7 +609,28 @@ class Optimizer(object):
                 samples = df_samples.values.tolist()
 
         return samples
-    
+
+    def _filter_failures(self, yi):
+        """Filter or replace failed objectives.
+
+        Args:
+            yi (list): a list of objectives.
+
+        Returns:
+            list: the filtered list.
+        """
+        if self.filter_failures in ["mean", "max"]:
+            yi_no_failure = [v for v in yi if v != OBJECTIVE_VALUE_FAILURE]
+
+            if self.filter_failures == "mean":
+                yi_failed_value = np.mean(yi_no_failure)
+            else:
+                yi_failed_value = np.max(yi_no_failure)
+            
+            yi = [v if v != OBJECTIVE_VALUE_FAILURE else yi_failed_value for v in yi]
+
+        return yi
+
     def _ask_random_points(self, size=None):
         samples = self.space.rvs(n_samples=self.n_points, random_state=self.rng)
 
@@ -701,124 +761,140 @@ class Optimizer(object):
             transformed_bounds = np.array(self.space.transformed_bounds)
             est = clone(self.base_estimator_)
 
+            # handle failures
+            yi = self._filter_failures(self.yi)
+
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 Xtt = self.space.imp_const.fit_transform(self.space.transform(self.Xi))
-                est.fit(Xtt, self.yi)
+                est.fit(Xtt, yi)
 
-            if hasattr(self, "next_xs_") and self.acq_func == "gp_hedge":
-                self.gains_ -= est.predict(np.vstack(self.next_xs_))
-
-            if self.max_model_queue_size is None:
-                self.models.append(est)
-            elif len(self.models) < self.max_model_queue_size:
-                self.models.append(est)
+            # for qLCB save the fitted estimator and skip the selection
+            if self.acq_func == "qLCB":
+                self._est = est
             else:
-                # Maximum list size obtained, remove oldest model.
-                self.models.pop(0)
-                self.models.append(est)
+                if hasattr(self, "next_xs_") and self.acq_func == "gp_hedge":
+                    self.gains_ -= est.predict(np.vstack(self.next_xs_))
 
-            # even with BFGS as optimizer we want to sample a large number
-            # of points and then pick the best ones as starting points
-            X_s = self.space.rvs(n_samples=self.n_points, random_state=self.rng)
+                if self.max_model_queue_size is None:
+                    self.models.append(est)
+                elif len(self.models) < self.max_model_queue_size:
+                    self.models.append(est)
+                else:
+                    # Maximum list size obtained, remove oldest model.
+                    self.models.pop(0)
+                    self.models.append(est)
 
-            X_s = self._filter_duplicated(X_s)
+                # even with BFGS as optimizer we want to sample a large number
+                # of points and then pick the best ones as starting points
+                X_s = self.space.rvs(n_samples=self.n_points, random_state=self.rng)
 
-            X = self.space.imp_const.fit_transform(self.space.transform(X_s))
-            self.next_xs_ = []
-            for cand_acq_func in self.cand_acq_funcs_:
-                values = _gaussian_acquisition(
-                    X=X,
-                    model=est,
-                    y_opt=np.min(self.yi),
-                    acq_func=cand_acq_func,
-                    acq_func_kwargs=self.acq_func_kwargs,
-                )
+                X_s = self._filter_duplicated(X_s)
 
-                # cache these values in case the strategy of ask is one-shot
-                self._last_X = X
-                self._last_values = values
-
-                # Find the minimum of the acquisition function by randomly
-                # sampling points from the space
-                if self.acq_optimizer == "sampling":
-                    next_x = X[np.argmin(values)]
-
-                elif self.acq_optimizer == "boltzmann_sampling":
-                    values = -values
-
-                    self._min_value = (
-                        self._min_value
-                        if self._min_value is None
-                        else min(values.min(), self._min_value)
-                    )
-                    self._max_value = (
-                        self._max_value
-                        if self._max_value is None
-                        else max(values.max(), self._max_value)
+                X = self.space.imp_const.fit_transform(self.space.transform(X_s))
+                self.next_xs_ = []
+                for cand_acq_func in self.cand_acq_funcs_:
+                    values = _gaussian_acquisition(
+                        X=X,
+                        model=est,
+                        y_opt=np.min(yi),
+                        acq_func=cand_acq_func,
+                        acq_func_kwargs=self.acq_func_kwargs,
                     )
 
-                    t = len(self.Xi)
-                    if t == 0:
-                        beta = 0
-                    else:
-                        beta = self.boltzmann_gamma * np.log(t) / np.abs(self._max_value - self._min_value)
+                    # cache these values in case the strategy of ask is one-shot
+                    self._last_X = X
+                    self._last_values = values
 
-                    probs = boltzman_distribution(values, beta)
+                    # Find the minimum of the acquisition function by randomly
+                    # sampling points from the space
+                    if self.acq_optimizer == "sampling":
+                        next_x = X[np.argmin(values)]
+                    
+                    elif self.acq_optimizer == "boltzmann_sampling":
 
-                    idx = np.argmax(self.rng.multinomial(1, probs))
+                        p = self.rng.uniform()
+                        if p <= self.boltzmann_psucc:
+                            next_x = X[np.argmin(values)]
+                        else:
+                            values = -values
 
-                    next_x = X[idx]
-
-                # Use BFGS to find the mimimum of the acquisition function, the
-                # minimization starts from `n_restarts_optimizer` different
-                # points and the best minimum is used
-                elif self.acq_optimizer == "lbfgs":
-                    x0 = X[np.argsort(values)[: self.n_restarts_optimizer]]
-
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("ignore")
-                        results = Parallel(n_jobs=self.n_jobs)(
-                            delayed(fmin_l_bfgs_b)(
-                                gaussian_acquisition_1D,
-                                x,
-                                args=(
-                                    est,
-                                    np.min(self.yi),
-                                    cand_acq_func,
-                                    self.acq_func_kwargs,
-                                ),
-                                bounds=self.space.transformed_bounds,
-                                approx_grad=False,
-                                maxiter=20,
+                            self._min_value = (
+                                self._min_value
+                                if self._min_value is None
+                                else min(values.min(), self._min_value)
                             )
-                            for x in x0
-                        )
+                            self._max_value = (
+                                self._max_value
+                                if self._max_value is None
+                                else max(values.max(), self._max_value)
+                            )
 
-                    cand_xs = np.array([r[0] for r in results])
-                    cand_acqs = np.array([r[1] for r in results])
-                    next_x = cand_xs[np.argmin(cand_acqs)]
+                            t = len(self.Xi)
+                            if t == 0:
+                                beta = 0
+                            else:
+                                beta = (
+                                    self.boltzmann_gamma
+                                    * np.log(t)
+                                    / np.abs(self._max_value - self._min_value)
+                                )
 
-                # lbfgs should handle this but just in case there are
-                # precision errors.
-                if not self.space.is_categorical:
-                    if not self.space.is_config_space:
-                        next_x = np.clip(
-                            next_x, transformed_bounds[:, 0], transformed_bounds[:, 1]
-                        )
-                self.next_xs_.append(next_x)
+                            probs = boltzman_distribution(values, beta)
 
-            if self.acq_func == "gp_hedge":
-                logits = np.array(self.gains_)
-                logits -= np.max(logits)
-                exp_logits = np.exp(self.eta * logits)
-                probs = exp_logits / np.sum(exp_logits)
-                next_x = self.next_xs_[np.argmax(self.rng.multinomial(1, probs))]
-            else:
-                next_x = self.next_xs_[0]
+                            idx = np.argmax(self.rng.multinomial(1, probs))
 
-            # note the need for [0] at the end
-            self._next_x = self.space.inverse_transform(next_x.reshape((1, -1)))[0]
+                            next_x = X[idx]
+
+                    # Use BFGS to find the mimimum of the acquisition function, the
+                    # minimization starts from `n_restarts_optimizer` different
+                    # points and the best minimum is used
+                    elif self.acq_optimizer == "lbfgs":
+                        x0 = X[np.argsort(values)[: self.n_restarts_optimizer]]
+
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            results = Parallel(n_jobs=self.n_jobs)(
+                                delayed(fmin_l_bfgs_b)(
+                                    gaussian_acquisition_1D,
+                                    x,
+                                    args=(
+                                        est,
+                                        np.min(yi),
+                                        cand_acq_func,
+                                        self.acq_func_kwargs,
+                                    ),
+                                    bounds=self.space.transformed_bounds,
+                                    approx_grad=False,
+                                    maxiter=20,
+                                )
+                                for x in x0
+                            )
+
+                        cand_xs = np.array([r[0] for r in results])
+                        cand_acqs = np.array([r[1] for r in results])
+                        next_x = cand_xs[np.argmin(cand_acqs)]
+
+                    # lbfgs should handle this but just in case there are
+                    # precision errors.
+                    if not self.space.is_categorical:
+                        if not self.space.is_config_space:
+                            next_x = np.clip(
+                                next_x, transformed_bounds[:, 0], transformed_bounds[:, 1]
+                            )
+                    self.next_xs_.append(next_x)
+
+                if self.acq_func == "gp_hedge":
+                    logits = np.array(self.gains_)
+                    logits -= np.max(logits)
+                    exp_logits = np.exp(self.eta * logits)
+                    probs = exp_logits / np.sum(exp_logits)
+                    next_x = self.next_xs_[np.argmax(self.rng.multinomial(1, probs))]
+                else:
+                    next_x = self.next_xs_[0]
+
+                # note the need for [0] at the end
+                self._next_x = self.space.inverse_transform(next_x.reshape((1, -1)))[0]
 
         # Pack results
         result = create_result(
@@ -842,7 +918,10 @@ class Optimizer(object):
         # if y isn't a scalar it means we have been handed a batch of points
         elif is_listlike(y) and is_2Dlistlike(x):
             for y_value in y:
-                if not isinstance(y_value, Number):
+                if (
+                    not isinstance(y_value, Number)
+                    and y_value != OBJECTIVE_VALUE_FAILURE
+                ):
                     raise ValueError("expected y to be a list of scalars")
 
         elif is_listlike(x):
