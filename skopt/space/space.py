@@ -1159,8 +1159,17 @@ class Space(object):
                 # Transpose
                 return _transpose_list_array(columns)
             else:
-                confs = self.model_sdv.sample(n_samples)
-                return confs.values
+                confs = self.model_sdv.sample(n_samples) # sample from SDV
+
+                columns = []
+                for dim in self.dimensions:
+                    if dim.name in confs.columns:
+                        columns.append(confs[dim.name].values.tolist())
+                    else:
+                        columns.append(dim.rvs(n_samples=n_samples, random_state=rng))
+
+                # Transpose
+                return _transpose_list_array(columns)
 
     def set_transformer(self, transform):
         """Sets the transformer of all dimension objects to `transform`
