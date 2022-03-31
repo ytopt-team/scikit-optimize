@@ -198,6 +198,8 @@ class Optimizer(object):
         acq_func_kwargs=None,
         acq_optimizer_kwargs=None,
         model_sdv=None,
+        sample_max_size=-1,
+        sample_strategy="quantile"
     ):
         args = locals().copy()
         del args["self"]
@@ -371,6 +373,10 @@ class Optimizer(object):
         self._min_value = 0
         self._max_value = 0
 
+        # parameters to stabilize the size of the dataset used to fit the surrogate model
+        self._sample_max_size = sample_max_size
+        self._sample_strategy = sample_strategy
+
     def copy(self, random_state=None):
         """Create a shallow copy of an instance of the optimizer.
 
@@ -392,7 +398,9 @@ class Optimizer(object):
             acq_func_kwargs=self.acq_func_kwargs,
             acq_optimizer_kwargs=self.acq_optimizer_kwargs,
             random_state=random_state,
-            model_sdv=self.model_sdv
+            model_sdv=self.model_sdv,
+            sample_max_size=self._sample_max_size,
+            sample_strategy=self._sample_strategy
         )
 
         optimizer._initial_samples = self._initial_samples
@@ -631,6 +639,40 @@ class Optimizer(object):
 
         return yi
 
+    def _sample(self, X, y):
+
+        X = np.asarray(X)
+        y = np.asarray(y)
+        size = y.shape[0]
+    
+        if self._sample_max_size > 0 and size > self._sample_max_size:
+            
+            if self._sample_strategy == "quantile":
+                quantiles = np.quantile(y, [0.10, 0.25, 0.50, 0.75, 0.90])
+                int_size = self._sample_max_size // (len(quantiles) + 1)
+
+                Xs, ys = [], []
+                for i in range(len(quantiles) + 1):
+                    if i == 0:
+                        s = y < quantiles[i]
+                    elif i == len(quantiles):
+                        s = quantiles[i-1] <= y
+                    else:
+                        s = (quantiles[i - 1] <= y) & (y < quantiles[i])
+
+
+                    idx = np.where(s)[0]
+                    idx = np.random.choice(idx, size=int_size, replace=True)
+                    Xi = X[idx]
+                    yi = y[idx]
+                    Xs.append(Xi)
+                    ys.append(yi)
+
+                X = np.concatenate(Xs, axis=0)
+                y = np.concatenate(ys, axis=0)
+
+        return X, y
+
     def _ask_random_points(self, size=None):
         samples = self.space.rvs(n_samples=self.n_points, random_state=self.rng)
 
@@ -764,9 +806,12 @@ class Optimizer(object):
             # handle failures
             yi = self._filter_failures(self.yi)
 
+            # handle size of the sample fit to the estimator
+            Xi, yi = self._sample(self.Xi, self.yi)
+
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                Xtt = self.space.imp_const.fit_transform(self.space.transform(self.Xi))
+                Xtt = self.space.imp_const.fit_transform(self.space.transform(Xi))
                 est.fit(Xtt, yi)
 
             # for qLCB save the fitted estimator and skip the selection
