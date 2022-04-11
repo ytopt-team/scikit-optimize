@@ -641,12 +641,11 @@ class Optimizer(object):
 
     def _sample(self, X, y):
 
-        X = np.asarray(X)
+        X = np.asarray(X, dtype="O")
         y = np.asarray(y)
         size = y.shape[0]
     
         if self._sample_max_size > 0 and size > self._sample_max_size:
-            
             if self._sample_strategy == "quantile":
                 quantiles = np.quantile(y, [0.10, 0.25, 0.50, 0.75, 0.90])
                 int_size = self._sample_max_size // (len(quantiles) + 1)
@@ -671,6 +670,8 @@ class Optimizer(object):
                 X = np.concatenate(Xs, axis=0)
                 y = np.concatenate(ys, axis=0)
 
+        X = X.tolist()
+        y = y.tolist()
         return X, y
 
     def _ask_random_points(self, size=None):
