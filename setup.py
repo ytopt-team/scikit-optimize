@@ -161,6 +161,7 @@ setup(
         "scipy>=0.19.1",
         "scikit-learn>=0.20.0",
         "pandas",
+        "ConfigSpace"
     ],
     extras_require={"plots": ["matplotlib>=2.0.0"]},
     cmdclass={
