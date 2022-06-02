@@ -1215,8 +1215,9 @@ class Space(object):
             points = []
             for conf in confs:
                 point = []
-                for hp in hps:
-                    val = conf.value(hp)
+                values = conf.values
+                for i, hp in enumerate(hps):
+                    val = values[i]
                     if CCS.ccs_inactive == val:
                         if self.hps_type[hp.name] == "Categorical":
                             val = "NA"
