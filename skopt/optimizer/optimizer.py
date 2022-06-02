@@ -325,6 +325,7 @@ class Optimizer(object):
                 raise RuntimeError("GP estimator is not available with ConfigSpace!")
         elif ccs_active and isinstance(dimensions, CCS.ConfigurationSpace):
             self.ccs = dimensions
+            self.ccs.rng.seed = self.rng.get_state()[1][0]
 
             if isinstance(self.base_estimator_, GaussianProcessRegressor):
                 raise RuntimeError("GP estimator is not available with CCS!")
