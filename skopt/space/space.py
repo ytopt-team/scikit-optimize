@@ -1077,9 +1077,9 @@ class Space(object):
                         param = Real(lower, upper, prior=prior, name=x.name)
                         self.hps_type[x.name] = "Real"
                     space.append(param)
-                    else:
-                        raise ValueError("Unknown Hyperparameter type")
-                dimensions = space
+                else:
+                    raise ValueError("Unknown Hyperparameter type")
+            dimensions = space
         self.dimensions = [check_dimension(dim) for dim in dimensions]
 
     def __eq__(self, other):
@@ -1285,9 +1285,6 @@ class Space(object):
                 columns = []
                 for dim in self.dimensions:
                     columns.append(dim.rvs(n_samples=n_samples, random_state=rng))
-
-                # Transpose
-                return _transpose_list_array(columns)
             else:
                 confs = self.model_sdv.sample(n_samples)  # sample from SDV
 
@@ -1297,9 +1294,8 @@ class Space(object):
                         columns.append(confs[dim.name].values.tolist())
                     else:
                         columns.append(dim.rvs(n_samples=n_samples, random_state=rng))
-
-                # Transpose
-                return _transpose_list_array(columns)
+            # Transpose
+            return _transpose_list_array(columns)
 
     def set_transformer(self, transform):
         """Sets the transformer of all dimension objects to `transform`
