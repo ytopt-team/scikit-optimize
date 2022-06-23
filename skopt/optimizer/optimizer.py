@@ -4,13 +4,6 @@ from math import log
 from numbers import Number
 
 import ConfigSpace as CS
-ccs_active = False
-try:
-    import cconfigspace as CCS
-    ccs_active = True
-except (ImportError, OSError) as a:
-    warnings.warn("CCS could not be loaded and is deactivated: " + str(a), category=ImportWarning)
-
 import numpy as np
 import pandas as pd
 
@@ -24,6 +17,7 @@ from sklearn.utils import check_random_state
 
 from ..acquisition import _gaussian_acquisition
 from ..acquisition import gaussian_acquisition_1D
+from ..acquisition import gaussian_lcb
 from ..learning import GaussianProcessRegressor
 from ..space import Categorical
 from ..space import Space
@@ -42,6 +36,15 @@ class ExhaustedSearchSpace(RuntimeError):
 
     def __str__(self):
         return f"The search space is exhausted and cannot sample new unique points!"
+
+
+def boltzman_distribution(x, beta=1):
+    x = np.exp(beta * x)
+    x = x / np.sum(x)
+    return x
+
+
+OBJECTIVE_VALUE_FAILURE = "F"
 
 
 class Optimizer(object):
@@ -85,6 +88,8 @@ class Optimizer(object):
         Number of evaluations of `func` with initialization points
         before approximating it with `base_estimator`. Initial point
         generator can be changed by setting `initial_point_generator`.
+    
+    initial_points : list, default: None
 
     initial_point_generator : str, InitialPointGenerator instance, \
             default: `"random"`
@@ -162,6 +167,9 @@ class Optimizer(object):
         Keeps list of models only as long as the argument given. In the
         case of None, the list has no capped length.
 
+    model_sdv : Model or None, default None
+        A Model from Synthetic-Data-Vault.
+
     Attributes
     ----------
     Xi : list
@@ -183,6 +191,7 @@ class Optimizer(object):
         base_estimator="gp",
         n_random_starts=None,
         n_initial_points=10,
+        initial_points=None,
         initial_point_generator="random",
         n_jobs=1,
         acq_func="gp_hedge",
@@ -191,6 +200,9 @@ class Optimizer(object):
         model_queue_size=None,
         acq_func_kwargs=None,
         acq_optimizer_kwargs=None,
+        model_sdv=None,
+        sample_max_size=-1,
+        sample_strategy="quantile",
     ):
         args = locals().copy()
         del args["self"]
@@ -203,7 +215,7 @@ class Optimizer(object):
         self.acq_func = acq_func
         self.acq_func_kwargs = acq_func_kwargs
 
-        allowed_acq_funcs = ["gp_hedge", "EI", "LCB", "PI", "EIps", "PIps"]
+        allowed_acq_funcs = ["gp_hedge", "EI", "LCB", "qLCB", "PI", "EIps", "PIps"]
         if self.acq_func not in allowed_acq_funcs:
             raise ValueError(
                 "expected acq_func to be in %s, got %s"
@@ -269,17 +281,19 @@ class Optimizer(object):
             else:
                 acq_optimizer = "sampling"
 
-        if acq_optimizer not in ["lbfgs", "sampling"]:
+        if acq_optimizer not in ["lbfgs", "sampling", "boltzmann_sampling"]:
             raise ValueError(
                 "Expected acq_optimizer to be 'lbfgs' or "
-                "'sampling', got {0}".format(acq_optimizer)
+                "'sampling' or 'softmax_sampling', got {0}".format(acq_optimizer)
             )
 
-        if not has_gradients(self.base_estimator_) and acq_optimizer != "sampling":
+        if not has_gradients(self.base_estimator_) and not (
+            "sampling" in acq_optimizer
+        ):
             raise ValueError(
-                "The regressor {0} should run with "
-                "acq_optimizer"
-                "='sampling'.".format(type(base_estimator))
+                "The regressor {0} should run with a 'sampling' "
+                "acq_optimizer such as "
+                "'sampling' or 'softmax_sampling'.".format(type(base_estimator))
             )
         self.acq_optimizer = acq_optimizer
 
@@ -291,6 +305,9 @@ class Optimizer(object):
         self.n_restarts_optimizer = acq_optimizer_kwargs.get("n_restarts_optimizer", 5)
         self.n_jobs = acq_optimizer_kwargs.get("n_jobs", 1)
         self.filter_duplicated = acq_optimizer_kwargs.get("filter_duplicated", True)
+        self.boltzmann_gamma = acq_optimizer_kwargs.get("boltzmann_gamma", 1)
+        self.boltzmann_psucc = acq_optimizer_kwargs.get("boltzmann_psucc", 0)
+        self.filter_failures = acq_optimizer_kwargs.get("filter_failures", "mean")
         self.acq_optimizer_kwargs = acq_optimizer_kwargs
 
         # Configure search space
@@ -298,33 +315,35 @@ class Optimizer(object):
         if type(dimensions) is CS.ConfigurationSpace:
             # Save the config space to do a real copy of the Optimizer
             self.config_space = dimensions
+            self.config_space.seed(self.rng.get_state()[1][0])
 
             if isinstance(self.base_estimator_, GaussianProcessRegressor):
                 raise RuntimeError("GP estimator is not available with ConfigSpace!")
-        elif ccs_active and isinstance(dimensions, CCS.ConfigurationSpace):
-            self.ccs = dimensions
-
-            if isinstance(self.base_estimator_, GaussianProcessRegressor):
-                raise RuntimeError("GP estimator is not available with CCS!")
         else:
 
             # normalize space if GP regressor
             if isinstance(self.base_estimator_, GaussianProcessRegressor):
                 dimensions = normalize_dimensions(dimensions)
 
-        self.space = Space(dimensions)
+        # keep track of the generative model from sdv
+        self.model_sdv = model_sdv
 
-        self._initial_samples = None
+        self.space = Space(dimensions, model_sdv=self.model_sdv)
+
+        self._initial_samples = [] if initial_points is None else initial_points[:]
         self._initial_point_generator = cook_initial_point_generator(
             initial_point_generator
         )
 
         if self._initial_point_generator is not None:
             transformer = self.space.get_transformer()
-            self._initial_samples = self._initial_point_generator.generate(
-                self.space.dimensions,
-                n_initial_points,
-                random_state=self.rng.randint(0, np.iinfo(np.int32).max),
+            self._initial_samples = (
+                self._initial_samples
+                + self._initial_point_generator.generate(
+                    self.space.dimensions,
+                    n_initial_points - len(self._initial_samples),
+                    random_state=self.rng.randint(0, np.iinfo(np.int32).max),
+                )
             )
             self.space.set_transformer(transformer)
 
@@ -353,7 +372,16 @@ class Optimizer(object):
         # return same sets of points. Reset to {} at every call to `tell`.
         self.cache_ = {}
 
+        # to avoid duplicated samples
         self.sampled = []
+
+        # for botlzmann strategy
+        self._min_value = 0
+        self._max_value = 0
+
+        # parameters to stabilize the size of the dataset used to fit the surrogate model
+        self._sample_max_size = sample_max_size
+        self._sample_strategy = sample_strategy
 
     def copy(self, random_state=None):
         """Create a shallow copy of an instance of the optimizer.
@@ -364,16 +392,10 @@ class Optimizer(object):
             Set the random state of the copy.
         """
 
-        dimens = None
-        if hasattr(self, "config_space"):
-            dimens = self.config_space
-        elif hasattr(self, "ccs"):
-            dimens = self.ccs
-        else:
-            dimens = self.space.dimensions
-
         optimizer = Optimizer(
-            dimensions=dimens,
+            dimensions=self.config_space
+            if hasattr(self, "config_space")
+            else self.space.dimensions,
             base_estimator=self.base_estimator_,
             n_initial_points=self.n_initial_points_,
             initial_point_generator=self._initial_point_generator,
@@ -382,7 +404,11 @@ class Optimizer(object):
             acq_func_kwargs=self.acq_func_kwargs,
             acq_optimizer_kwargs=self.acq_optimizer_kwargs,
             random_state=random_state,
+            model_sdv=self.model_sdv,
+            sample_max_size=self._sample_max_size,
+            sample_strategy=self._sample_strategy,
         )
+
         optimizer._initial_samples = self._initial_samples
 
         optimizer.sampled = self.sampled[:]
@@ -430,7 +456,30 @@ class Optimizer(object):
             self.sampled.append(x)
             return x
 
-        supported_strategies = ["cl_min", "cl_mean", "cl_max"]
+        if n_points > 0 and (
+            self._n_initial_points > 0 or self.base_estimator_ is None
+        ):
+            if len(self._initial_samples) == 0:
+                X = self._ask_random_points(size=n_points)
+            else:
+                n = min(len(self._initial_samples), n_points)
+                X = self._initial_samples[:n]
+                self._initial_samples = self._initial_samples[n:]
+                X = X + self._ask_random_points(size=(n_points - n))
+            self.sampled.extend(X)
+            return X
+
+        if self.acq_func == "qLCB":
+            strategy = "qLCB"
+
+        supported_strategies = [
+            "cl_min",
+            "cl_mean",
+            "cl_max",
+            "topk",
+            "boltzmann",
+            "qLCB",
+        ]
 
         if not (isinstance(n_points, int) and n_points > 0):
             raise ValueError("n_points should be int > 0, got " + str(n_points))
@@ -442,6 +491,74 @@ class Optimizer(object):
                 + ", "
                 + "got %s" % strategy
             )
+
+        # handle one-shot strategies (topk, softmax)
+        if hasattr(self, "_last_X") and strategy == "topk":
+            idx = np.argsort(self._last_values)[:n_points]
+            next_samples = self._last_X[idx].tolist()
+
+            # to track sampled values and avoid duplicates
+            self.sampled.extend(next_samples)
+
+            return next_samples
+
+        if hasattr(self, "_last_X") and strategy == "boltzmann":
+            values = -self._last_values
+
+            self._min_value = (
+                self._min_value
+                if self._min_value is None
+                else min(values.min(), self._min_value)
+            )
+            self._max_value = (
+                self._max_value
+                if self._max_value is None
+                else max(values.max(), self._max_value)
+            )
+
+            idx = [np.argmax(values)]
+            max_trials = 100
+            trials = 0
+
+            while len(idx) < n_points:
+
+                t = len(self.sampled)
+                if t == 0:
+                    beta = 0
+                else:
+                    beta = (
+                        self.boltzmann_gamma
+                        * np.log(t)
+                        / np.abs(self._max_value - self._min_value)
+                    )
+
+                probs = boltzman_distribution(values, beta)
+
+                new_idx = np.argmax(self.rng.multinomial(1, probs))
+
+                if self.filter_duplicated and new_idx in idx and trials < max_trials:
+                    trials += 1
+                else:
+                    idx.append(new_idx)
+                    self.sampled.append(self._last_X[new_idx].tolist())
+
+            return self._last_X[idx].tolist()
+
+        if hasattr(self, "_est") and self.acq_func == "qLCB":
+            X_s = self.space.rvs(n_samples=self.n_points, random_state=self.rng)
+            X_s = self._filter_duplicated(X_s)
+            X_c = self.space.imp_const.fit_transform(
+                self.space.transform(X_s)
+            )  # candidates
+            mu, std = self._est.predict(X_c, return_std=True)
+            kappa = self.acq_func_kwargs.get("kappa", 1.96)
+            kappas = self.rng.exponential(kappa, size=n_points)
+            X = []
+            for kappa in kappas:
+                values = mu - kappa * std
+                idx = np.argmin(values)
+                X.append(X_s[idx])
+            return X
 
         # Caching the result with n_points not None. If some new parameters
         # are provided to the ask, the cache_ is not used.
@@ -466,14 +583,16 @@ class Optimizer(object):
             ti_available = "ps" in self.acq_func and len(opt.yi) > 0
             ti = [t for (_, t) in opt.yi] if ti_available else None
 
+            opt_yi = self._filter_failures(opt.yi)
+
             if strategy == "cl_min":
-                y_lie = np.min(opt.yi) if opt.yi else 0.0  # CL-min lie
+                y_lie = np.min(opt_yi) if opt_yi else 0.0  # CL-min lie
                 t_lie = np.min(ti) if ti is not None else log(sys.float_info.max)
             elif strategy == "cl_mean":
-                y_lie = np.mean(opt.yi) if opt.yi else 0.0  # CL-mean lie
+                y_lie = np.mean(opt_yi) if opt_yi else 0.0  # CL-mean lie
                 t_lie = np.mean(ti) if ti is not None else log(sys.float_info.max)
             else:
-                y_lie = np.max(opt.yi) if opt.yi else 0.0  # CL-max lie
+                y_lie = np.max(opt_yi) if opt_yi else 0.0  # CL-max lie
                 t_lie = np.max(ti) if ti is not None else log(sys.float_info.max)
 
             # Lie to the optimizer.
@@ -489,30 +608,101 @@ class Optimizer(object):
         return X
 
     def _filter_duplicated(self, samples):
+        """Filter out duplicated values in ``samples``.
+
+        Args:
+            samples (list): the list of samples to filter.
+
+        Returns:
+            list: the filtered list of samples
+        """
 
         if self.filter_duplicated:
             # check duplicated values
 
             if hasattr(self, "config_space"):
                 hps_names = self.config_space.get_hyperparameter_names()
-            elif hasattr(self, "ccs"):
-                hps_names = [x.name for x in self.ccs.hyperparameters]
             else:
                 hps_names = self.space.dimension_names
 
-            df_samples = pd.DataFrame(data=samples, columns=hps_names)
+            df_samples = pd.DataFrame(data=samples, columns=hps_names, dtype="O")
             df_samples = df_samples[~df_samples.duplicated(keep="first")]
 
             if len(self.sampled) > 0:
                 df_history = pd.DataFrame(data=self.sampled, columns=hps_names)
                 df_merge = pd.merge(df_samples, df_history, on=None, how="inner")
-                df_samples = df_samples.append(df_merge)
+                df_samples = pd.concat([df_samples, df_merge])
                 df_samples = df_samples[~df_samples.duplicated(keep=False)]
 
-            if  len(df_samples) > 0:
+            if len(df_samples) > 0:
                 samples = df_samples.values.tolist()
 
         return samples
+
+    def _filter_failures(self, yi):
+        """Filter or replace failed objectives.
+
+        Args:
+            yi (list): a list of objectives.
+
+        Returns:
+            list: the filtered list.
+        """
+        if self.filter_failures in ["mean", "max"]:
+            yi_no_failure = [v for v in yi if v != OBJECTIVE_VALUE_FAILURE]
+
+            if self.filter_failures == "mean":
+                yi_failed_value = np.mean(yi_no_failure)
+            else:
+                yi_failed_value = np.max(yi_no_failure)
+
+            yi = [v if v != OBJECTIVE_VALUE_FAILURE else yi_failed_value for v in yi]
+
+        return yi
+
+    def _sample(self, X, y):
+
+        X = np.asarray(X, dtype="O")
+        y = np.asarray(y)
+        size = y.shape[0]
+
+        if self._sample_max_size > 0 and size > self._sample_max_size:
+            if self._sample_strategy == "quantile":
+                quantiles = np.quantile(y, [0.10, 0.25, 0.50, 0.75, 0.90])
+                int_size = self._sample_max_size // (len(quantiles) + 1)
+
+                Xs, ys = [], []
+                for i in range(len(quantiles) + 1):
+                    if i == 0:
+                        s = y < quantiles[i]
+                    elif i == len(quantiles):
+                        s = quantiles[i - 1] <= y
+                    else:
+                        s = (quantiles[i - 1] <= y) & (y < quantiles[i])
+
+                    idx = np.where(s)[0]
+                    idx = np.random.choice(idx, size=int_size, replace=True)
+                    Xi = X[idx]
+                    yi = y[idx]
+                    Xs.append(Xi)
+                    ys.append(yi)
+
+                X = np.concatenate(Xs, axis=0)
+                y = np.concatenate(ys, axis=0)
+
+        X = X.tolist()
+        y = y.tolist()
+        return X, y
+
+    def _ask_random_points(self, size=None):
+        samples = self.space.rvs(n_samples=self.n_points, random_state=self.rng)
+
+        samples = self._filter_duplicated(samples)
+
+        if size is None:
+            return samples[0]
+        else:
+            return samples[:size]
 
     def _ask(self):
         """Suggest next point at which to evaluate the objective.
@@ -524,12 +714,8 @@ class Optimizer(object):
         if self._n_initial_points > 0 or self.base_estimator_ is None:
             # this will not make a copy of `self.rng` and hence keep advancing
             # our random state.
-            if self._initial_samples is None:
-                samples = self.space.rvs(n_samples=self.n_points, random_state=self.rng)
-
-                samples = self._filter_duplicated(samples)
-
-                return samples[0]
+            if len(self._initial_samples) == 0:
+                return self._ask_random_points()
             else:
                 # The samples are evaluated starting form initial_samples[0]
                 return self._initial_samples[
@@ -544,8 +730,10 @@ class Optimizer(object):
 
             next_x = self._next_x
             if next_x is not None:
-                if not self.space.is_config_space and not self.space.is_ccs:
-                    min_delta_x = min([self.space.distance(next_x, xi) for xi in self.Xi])
+                if not self.space.is_config_space:
+                    min_delta_x = min(
+                        [self.space.distance(next_x, xi) for xi in self.Xi]
+                    )
                     if abs(min_delta_x) <= 1e-8:
                         warnings.warn(
                             "The objective has been evaluated " "at this point before."
@@ -582,8 +770,6 @@ class Optimizer(object):
             the optimizer irrespective of the value of `fit`.
         """
         if self.space.is_config_space:
-            pass
-        elif self.space.is_ccs:
             pass
         else:
             check_x_in_space(x, self.space)
@@ -638,96 +824,150 @@ class Optimizer(object):
             transformed_bounds = np.array(self.space.transformed_bounds)
             est = clone(self.base_estimator_)
 
+            # handle failures
+            yi = self._filter_failures(self.yi)
+
+            # handle size of the sample fit to the estimator
+            Xi, yi = self._sample(self.Xi, yi)
+
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                Xtt = self.space.imp_const.fit_transform(self.space.transform(self.Xi))
-                est.fit(Xtt, self.yi)
+                Xtt = self.space.imp_const.fit_transform(self.space.transform(Xi))
+                est.fit(Xtt, yi)
 
-            if hasattr(self, "next_xs_") and self.acq_func == "gp_hedge":
-                self.gains_ -= est.predict(np.vstack(self.next_xs_))
-
-            if self.max_model_queue_size is None:
-                self.models.append(est)
-            elif len(self.models) < self.max_model_queue_size:
-                self.models.append(est)
+            # for qLCB save the fitted estimator and skip the selection
+            if self.acq_func == "qLCB":
+                self._est = est
             else:
-                # Maximum list size obtained, remove oldest model.
-                self.models.pop(0)
-                self.models.append(est)
+                if hasattr(self, "next_xs_") and self.acq_func == "gp_hedge":
+                    self.gains_ -= est.predict(np.vstack(self.next_xs_))
 
-            # even with BFGS as optimizer we want to sample a large number
-            # of points and then pick the best ones as starting points
-            X_s = self.space.rvs(n_samples=self.n_points, random_state=self.rng)
+                if self.max_model_queue_size is None:
+                    self.models.append(est)
+                elif len(self.models) < self.max_model_queue_size:
+                    self.models.append(est)
+                else:
+                    # Maximum list size obtained, remove oldest model.
+                    self.models.pop(0)
+                    self.models.append(est)
 
-            X_s = self._filter_duplicated(X_s)
+                # even with BFGS as optimizer we want to sample a large number
+                # of points and then pick the best ones as starting points
+                X_s = self.space.rvs(n_samples=self.n_points, random_state=self.rng)
 
-            X = self.space.imp_const.fit_transform(self.space.transform(X_s))
-            self.next_xs_ = []
-            for cand_acq_func in self.cand_acq_funcs_:
-                values = _gaussian_acquisition(
-                    X=X,
-                    model=est,
-                    y_opt=np.min(self.yi),
-                    acq_func=cand_acq_func,
-                    acq_func_kwargs=self.acq_func_kwargs,
-                )
-                # Find the minimum of the acquisition function by randomly
-                # sampling points from the space
-                if self.acq_optimizer == "sampling":
-                    next_x = X[np.argmin(values)]
+                X_s = self._filter_duplicated(X_s)
 
-                # Use BFGS to find the mimimum of the acquisition function, the
-                # minimization starts from `n_restarts_optimizer` different
-                # points and the best minimum is used
-                elif self.acq_optimizer == "lbfgs":
-                    x0 = X[np.argsort(values)[: self.n_restarts_optimizer]]
+                X = self.space.imp_const.fit_transform(self.space.transform(X_s))
+                self.next_xs_ = []
+                for cand_acq_func in self.cand_acq_funcs_:
+                    values = _gaussian_acquisition(
+                        X=X,
+                        model=est,
+                        y_opt=np.min(yi),
+                        acq_func=cand_acq_func,
+                        acq_func_kwargs=self.acq_func_kwargs,
+                    )
 
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("ignore")
-                        results = Parallel(n_jobs=self.n_jobs)(
-                            delayed(fmin_l_bfgs_b)(
-                                gaussian_acquisition_1D,
-                                x,
-                                args=(
-                                    est,
-                                    np.min(self.yi),
-                                    cand_acq_func,
-                                    self.acq_func_kwargs,
-                                ),
-                                bounds=self.space.transformed_bounds,
-                                approx_grad=False,
-                                maxiter=20,
+                    # cache these values in case the strategy of ask is one-shot
+                    self._last_X = X
+                    self._last_values = values
+
+                    # Find the minimum of the acquisition function by randomly
+                    # sampling points from the space
+                    if self.acq_optimizer == "sampling":
+                        next_x = X[np.argmin(values)]
+
+                    elif self.acq_optimizer == "boltzmann_sampling":
+
+                        p = self.rng.uniform()
+                        if p <= self.boltzmann_psucc:
+                            next_x = X[np.argmin(values)]
+                        else:
+                            values = -values
+
+                            self._min_value = (
+                                self._min_value
+                                if self._min_value is None
+                                else min(values.min(), self._min_value)
                             )
-                            for x in x0
-                        )
+                            self._max_value = (
+                                self._max_value
+                                if self._max_value is None
+                                else max(values.max(), self._max_value)
+                            )
 
-                    cand_xs = np.array([r[0] for r in results])
-                    cand_acqs = np.array([r[1] for r in results])
-                    next_x = cand_xs[np.argmin(cand_acqs)]
+                            t = len(self.Xi)
+                            if t == 0:
+                                beta = 0
+                            else:
+                                beta = (
+                                    self.boltzmann_gamma
+                                    * np.log(t)
+                                    / np.abs(self._max_value - self._min_value)
+                                )
 
-                # lbfgs should handle this but just in case there are
-                # precision errors.
-                if not self.space.is_categorical:
-                    if not self.space.is_config_space and not self.space.is_ccs:
-                        next_x = np.clip(
-                            next_x, transformed_bounds[:, 0], transformed_bounds[:, 1]
-                        )
-                self.next_xs_.append(next_x)
+                            probs = boltzman_distribution(values, beta)
 
-            if self.acq_func == "gp_hedge":
-                logits = np.array(self.gains_)
-                logits -= np.max(logits)
-                exp_logits = np.exp(self.eta * logits)
-                probs = exp_logits / np.sum(exp_logits)
-                next_x = self.next_xs_[np.argmax(self.rng.multinomial(1, probs))]
-            else:
-                next_x = self.next_xs_[0]
+                            idx = np.argmax(self.rng.multinomial(1, probs))
 
-            # note the need for [0] at the end
-            self._next_x = self.space.inverse_transform(next_x.reshape((1, -1)))[0]
+                            next_x = X[idx]
+
+                    # Use BFGS to find the mimimum of the acquisition function, the
+                    # minimization starts from `n_restarts_optimizer` different
+                    # points and the best minimum is used
+                    elif self.acq_optimizer == "lbfgs":
+                        x0 = X[np.argsort(values)[: self.n_restarts_optimizer]]
+
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            results = Parallel(n_jobs=self.n_jobs)(
+                                delayed(fmin_l_bfgs_b)(
+                                    gaussian_acquisition_1D,
+                                    x,
+                                    args=(
+                                        est,
+                                        np.min(yi),
+                                        cand_acq_func,
+                                        self.acq_func_kwargs,
+                                    ),
+                                    bounds=self.space.transformed_bounds,
+                                    approx_grad=False,
+                                    maxiter=20,
+                                )
+                                for x in x0
+                            )
+
+                        cand_xs = np.array([r[0] for r in results])
+                        cand_acqs = np.array([r[1] for r in results])
+                        next_x = cand_xs[np.argmin(cand_acqs)]
+
+                    # lbfgs should handle this but just in case there are
+                    # precision errors.
+                    if not self.space.is_categorical:
+                        if not self.space.is_config_space:
+                            next_x = np.clip(
+                                next_x,
+                                transformed_bounds[:, 0],
+                                transformed_bounds[:, 1],
+                            )
+                    self.next_xs_.append(next_x)
+
+                if self.acq_func == "gp_hedge":
+                    logits = np.array(self.gains_)
+                    logits -= np.max(logits)
+                    exp_logits = np.exp(self.eta * logits)
+                    probs = exp_logits / np.sum(exp_logits)
+                    next_x = self.next_xs_[np.argmax(self.rng.multinomial(1, probs))]
+                else:
+                    next_x = self.next_xs_[0]
+
+                # note the need for [0] at the end
+                self._next_x = self.space.inverse_transform(next_x.reshape((1, -1)))[0]
 
         # Pack results
-        result = create_result(self.Xi, self.yi, self.space, self.rng, models=self.models)
+        result = create_result(
+            self.Xi, self.yi, self.space, self.rng, models=self.models
+        )
 
         result.specs = self.specs
         return result
@@ -746,7 +986,10 @@ class Optimizer(object):
         # if y isn't a scalar it means we have been handed a batch of points
         elif is_listlike(y) and is_2Dlistlike(x):
             for y_value in y:
-                if not isinstance(y_value, Number):
+                if (
+                    not isinstance(y_value, Number)
+                    and y_value != OBJECTIVE_VALUE_FAILURE
+                ):
                     raise ValueError("expected y to be a list of scalars")
 
         elif is_listlike(x):
@@ -765,7 +1008,9 @@ class Optimizer(object):
             x = self.ask()
             self.tell(x, func(x))
 
-        result = create_result(self.Xi, self.yi, self.space, self.rng, models=self.models)
+        result = create_result(
+            self.Xi, self.yi, self.space, self.rng, models=self.models
+        )
         result.specs = self.specs
         return result
 
@@ -789,6 +1034,8 @@ class Optimizer(object):
             OptimizeResult instance with the required information.
 
         """
-        result = create_result(self.Xi, self.yi, self.space, self.rng, models=self.models)
+        result = create_result(
+            self.Xi, self.yi, self.space, self.rng, models=self.models
+        )
         result.specs = self.specs
         return result
