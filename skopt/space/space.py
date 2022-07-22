@@ -673,9 +673,12 @@ class Integer(Dimension):
     @property
     def transformed_bounds(self):
         if self.transform_ == "normalize":
-            return 0., 1.
+            return 0.0, 1.0
         else:
-            return (self.low, self.high)
+            if self.prior == "uniform":
+                return self.low, self.high
+            else:
+                return np.log10(self.low), np.log10(self.high)
 
     def distance(self, a, b):
         """Compute distance between point `a` and `b`.
