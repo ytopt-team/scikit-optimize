@@ -673,9 +673,12 @@ class Integer(Dimension):
     @property
     def transformed_bounds(self):
         if self.transform_ == "normalize":
-            return 0., 1.
+            return 0.0, 1.0
         else:
-            return (self.low, self.high)
+            if self.prior == "uniform":
+                return self.low, self.high
+            else:
+                return np.log10(self.low), np.log10(self.high)
 
     def distance(self, a, b):
         """Compute distance between point `a` and `b`.
@@ -1118,6 +1121,43 @@ class Space(object):
 
         return space
 
+    def _cs_post_process_conf(self, hps_names, conf):
+        point = []
+        for hp_name in hps_names:
+            val = np.nan
+            if self.hps_type[hp_name] == "Categorical":
+                val = "NA"
+            if hp_name in conf.keys():
+                val = conf[hp_name]
+            point.append(val)
+        return point
+
+
+    def _ccs_post_process_conf(self, hps_names, conf):
+        point = []
+        values = conf.values
+        for i, hp_name in enumerate(hps_names):
+            val = values[i]
+            if CCS.ccs_inactive == val:
+                if self.hps_type[hp_name] == "Categorical":
+                    val = "NA"
+                else:
+                    val = np.nan
+            point.append(val)
+        return point
+
+    def default(self):
+        if self.is_config_space:
+            conf = self.config_space.get_default_configuration()
+            hps_names = self.config_space.get_hyperparameter_names()
+            return self._cs_post_process_conf(hps_names, conf)
+        elif self.is_ccs:
+            conf = self.ccs.default_configuration
+            hps_names = [x.name for x in self.ccs.hyperparameters]
+            return self._ccs_post_process_conf(hps_names, conf)
+        else:
+            return None
+
     def rvs(self, n_samples=1, random_state=None):
         """Draw random samples.
 
@@ -1140,42 +1180,22 @@ class Space(object):
         """
         rng = check_random_state(random_state)
         if self.is_config_space:
-            req_points = []
-
+            points = []
             confs = self.config_space.sample_configuration(n_samples)
             if n_samples == 1:
                 confs = [confs]
-
             hps_names = self.config_space.get_hyperparameter_names()
             for conf in confs:
-                point = []
-                for hps_name in hps_names:
-                    val = np.nan
-                    if self.hps_type[hps_name] == "Categorical":
-                        val = "NA"
-                    if hps_name in conf.keys():
-                        val = conf[hps_name]
-                    point.append(val)
-                req_points.append(point)
-
-            return req_points
-        elif self.is_ccs:
-            confs = self.ccs.samples(n_samples)
-            hps = self.ccs.hyperparameters
-            points = []
-            for conf in confs:
-                point = []
-                values = conf.values
-                for i, hp in enumerate(hps):
-                    val = values[i]
-                    if CCS.ccs_inactive == val:
-                        if self.hps_type[hp.name] == "Categorical":
-                            val = "NA"
-                        else:
-                            val = np.nan
-                    point.append(val)
+                point = self._cs_post_process_conf(hps_names, conf)
                 points.append(point)
-
+            return points
+        elif self.is_ccs:
+            points = []
+            confs = self.ccs.samples(n_samples)
+            hps_names = [x.name for x in self.ccs.hyperparameters]
+            for conf in confs:
+                point = self._ccs_post_process_conf(hps_names, conf)
+                points.append(point)
             return points
         else:
             # Draw
