@@ -1,5 +1,6 @@
 import numbers
 import numpy as np
+import pandas as pd
 import yaml
 import sys
 
@@ -1185,6 +1186,62 @@ class Space(object):
 
         return space
 
+    def sdv_close_enough(self, samples, rows, col, target):
+        out = []
+        criterion = self.config_space.approximate_conditions_dict['criterion']
+        # Eliminate unfit rows (beyond nearest criterion in wrong direction)
+        if target > criterion[-1]:
+            possible = samples[samples[col] > criterion[-1]]
+        elif target < criterion[0]:
+            possible = samples[samples[col] < criterion[0]]
+        else:
+            # Find target criterion in middle using detection of sign change of difference
+            sign_idx = list(np.sign(pd.Series(criterion)-target).diff()[1:].ne(0)).index(True)
+            lower, upper = criterion[sign_idx:sign_idx+2]
+            possible = samples[(samples[col] > lower) & (samples[col] < upper)]
+        # In case absolutely no rows are fit, we'll revert to choosing from the best available
+        if len(possible) == 0:
+            possible = samples
+        # Prioritize closest rows first
+        dists = (possible[col]-target).abs().sort_values().index[:rows]
+        return possible.loc[dists].reset_index(drop=True)
+
+    def sdv_sample_approximate_conditions(self, n_samples):
+        approximate_conditions_dict = self.config_space.approximate_conditions_dict
+        if not hasattr(self, 'has_support'):
+            import inspect
+            try:
+                source = inspect.getsource(self.model_sdv._sample)
+                self.has_support = not("raise NotImplementedError" in source\
+                              and "doesn't support conditional sampling" in source)
+            except AttributeError:
+                self.has_support = False
+        if self.has_support:
+            return self.model_sdv.sample_conditions(approximate_conditions_dict['conditions'])
+        # Else use manual approximation for sampling bias
+        selected = []
+        prev_len = -1
+        cur_len = 0
+        params = approximate_conditions_dict['param_names']
+        # Lack of change may be indication that no other rows can be found
+        while prev_len < n_samples and cur_len != prev_len:
+            prev_len = cur_len
+            samples = self.model_sdv.sample(num_rows=n_samples, randomize_samples=False)
+            candidate = []
+            for cond in approximate_conditions_dict['conditions']:
+                n_rows = cond.get_num_rows()
+                for (col, target) in cond.get_column_values().items():
+                    candidate.append(self.sdv_close_enough(samples, n_rows, col, target))
+            candidate = pd.concat(candidate).drop_duplicates(subset=params)
+            selected.append(candidate)
+            cur_len = sum(map(len, selected))
+        selected = pd.concat(selected).drop_duplicates(subset=params)
+        # FORCE conditions to be held in the data
+        for cond in approximate_conditions_dict['conditions']:
+            for (col, target) in cond.get_column_values().items():
+                selected[col] = target
+        return selected
+
     def rvs(self, n_samples=1, random_state=None):
         """Draw random samples.
 
@@ -1218,7 +1275,10 @@ class Space(object):
                 if n_samples == 1:
                     confs = [confs]
             else:
-                confs = self.model_sdv.sample(n_samples)
+                if hasattr(self.config_space, 'approximate_conditions_dict'):
+                    confs = self.sdv_sample_approximate_conditions(n_samples)
+                else:
+                    confs = self.model_sdv.sample(n_samples)
 
                 sdv_names = confs.columns
 

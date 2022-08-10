@@ -30,7 +30,6 @@ from ..utils import is_2Dlistlike
 from ..utils import normalize_dimensions
 from ..utils import cook_initial_point_generator
 
-
 class ExhaustedSearchSpace(RuntimeError):
     """ "Raised when the search cannot sample new points from the ConfigSpace."""
 
@@ -180,7 +179,7 @@ class Optimizer(object):
         Regression models used to fit observations and compute acquisition
         function.
     space : Space
-        An instance of :class:`skopt.space.Space`. Stores parameter search
+        An instance of :class:`deephyper.skopt.space.Space`. Stores parameter search
         space used to sample points, bounds, and type of parameters.
 
     """
@@ -327,9 +326,7 @@ class Optimizer(object):
 
         # keep track of the generative model from sdv
         self.model_sdv = model_sdv
-
         self.space = Space(dimensions, model_sdv=self.model_sdv)
-
         self._initial_samples = [] if initial_points is None else initial_points[:]
         self._initial_point_generator = cook_initial_point_generator(
             initial_point_generator
@@ -626,7 +623,10 @@ class Optimizer(object):
                 hps_names = self.space.dimension_names
 
             df_samples = pd.DataFrame(data=samples, columns=hps_names, dtype="O")
-            df_samples = df_samples[~df_samples.duplicated(keep="first")]
+            # Also drop things already seen in Xi
+            xi_samples = pd.DataFrame(data=self.Xi, columns=hps_names, dtype="O")
+            # NO duplicates should be present from this point on
+            df_samples = pd.concat((df_samples, xi_samples)).drop_duplicates(keep=False)
 
             if len(self.sampled) > 0:
                 df_history = pd.DataFrame(data=self.sampled, columns=hps_names)
