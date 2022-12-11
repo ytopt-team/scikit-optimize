@@ -936,6 +936,13 @@ class Space(object):
                     param = Categorical(vals, name=x.name)
                     space.append(param)
                     self.hps_type[x.name] = "Categorical"
+                elif isinstance(x, CS.hyperparameters.Constant):
+                    vals = [x.value]
+                    if x.name in cond_hps:
+                        vals.append("NA")
+                    param = Categorical(vals, name=x.name)
+                    space.append(param)
+                    self.hps_type[x.name] = "Categorical"
                 elif isinstance(x, CS.hyperparameters.UniformIntegerHyperparameter):
                     prior = "uniform"
                     if x.log:
