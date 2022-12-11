@@ -1,3 +1,4 @@
+from sklearn.impute import SimpleImputer
 import numbers
 import numpy as np
 import yaml
@@ -10,7 +11,7 @@ from sklearn.utils import check_random_state
 from sklearn.utils.fixes import sp_version
 
 
-if type(sp_version) is not tuple:  # Version object since sklearn>=2.3.x
+if not isinstance(sp_version, tuple):  # Version object since sklearn>=2.3.x
     if hasattr(sp_version, "release"):
         sp_version = sp_version.release
     else:
@@ -34,9 +35,10 @@ try:
     ccs_active = True
 except (ImportError, OSError) as a:
     import warnings
-    warnings.warn("CCS could not be loaded and is deactivated: " + str(a), category=ImportWarning)
-
-from sklearn.impute import SimpleImputer
+    warnings.warn(
+        "CCS could not be loaded and is deactivated: " +
+        str(a),
+        category=ImportWarning)
 
 
 # helper class to be able to print [1, ..., 4] instead of [1, '...', 4]
@@ -121,7 +123,8 @@ def check_dimension(dimension, transform=None):
 
     if len(dimension) == 2:
         if any(
-            [isinstance(d, (str, bool)) or isinstance(d, np.bool_) for d in dimension]
+            [isinstance(d, (str, bool)) or isinstance(d, np.bool_)
+             for d in dimension]
         ):
             return Categorical(dimension, transform=transform)
         elif all([isinstance(dim, numbers.Integral) for dim in dimension]):
@@ -242,10 +245,12 @@ def _uniform_inclusive(loc=0.0, scale=1.0):
     # XXX scale is very large.
     return uniform(loc=loc, scale=np.nextafter(scale, scale + 1.0))
 
+
 def _normal_inclusive(loc=0.0, scale=1.0, lower=-2, upper=2):
     assert lower <= upper
     a, b = (lower - loc) / scale, (upper - loc) / scale
     return truncnorm(a, b, loc=loc, scale=scale)
+
 
 class Real(Dimension):
     """Search space dimension that can take on any real value.
@@ -287,6 +292,7 @@ class Real(Dimension):
         can be float.
 
     """
+
     def __init__(self, low, high, prior="uniform", base=10, transform=None,
                  name=None, dtype=float, loc=None, scale=None):
         if high <= low:
@@ -347,7 +353,8 @@ class Real(Dimension):
             self._rvs = _uniform_inclusive(0.0, 1.0)
             assert self.prior in ["uniform", "log-uniform"]
             if self.prior == "uniform":
-                self.transformer = Pipeline([Identity(), Normalize(self.low, self.high)])
+                self.transformer = Pipeline(
+                    [Identity(), Normalize(self.low, self.high)])
             else:
                 self.transformer = Pipeline(
                     [
@@ -363,7 +370,8 @@ class Real(Dimension):
                 self._rvs = _uniform_inclusive(self.low, self.high - self.low)
                 self.transformer = Identity()
             elif self.prior == "normal":
-                self._rvs = _normal_inclusive(self.loc, self.scale, self.low, self.high)
+                self._rvs = _normal_inclusive(
+                    self.loc, self.scale, self.low, self.high)
                 self.transformer = Identity()
             else:
                 self._rvs = _uniform_inclusive(
@@ -375,7 +383,7 @@ class Real(Dimension):
 
     def __eq__(self, other):
         return (
-            type(self) is type(other)
+            isinstance(self, type(other))
             and np.allclose([self.low], [other.low])
             and np.allclose([self.high], [other.high])
             and self.prior == other.prior
@@ -607,7 +615,8 @@ class Integer(Dimension):
                 self._rvs = randint(self.low, self.high + 1)
                 self.transformer = Identity()
             elif self.prior == "normal":
-                self._rvs = _normal_inclusive(self.loc, self.scale, self.low, self.high)
+                self._rvs = _normal_inclusive(
+                    self.loc, self.scale, self.low, self.high)
                 self.transformer = ToInteger()
             else:
                 self._rvs = _uniform_inclusive(
@@ -619,7 +628,7 @@ class Integer(Dimension):
 
     def __eq__(self, other):
         return (
-            type(self) is type(other)
+            isinstance(self, type(other))
             and np.allclose([self.low], [other.low])
             and np.allclose([self.high], [other.high])
         )
@@ -649,7 +658,8 @@ class Integer(Dimension):
         if self.dtype == int or self.dtype == "int":
             # necessary, otherwise the type is converted to a numpy type
             return getattr(
-                np.round(inv_transform).astype(self.dtype), "tolist", lambda: value
+                np.round(inv_transform).astype(
+                    self.dtype), "tolist", lambda: value
             )()
         else:
             return np.round(inv_transform).astype(self.dtype)
@@ -740,7 +750,8 @@ class Categorical(Dimension):
         self.prior = prior
 
         if prior is None:
-            self.prior_ = np.tile(1.0 / len(self.categories), len(self.categories))
+            self.prior_ = np.tile(1.0 /
+                                  len(self.categories), len(self.categories))
         else:
             self.prior_ = prior
         self.set_transformer(transform)
@@ -755,7 +766,8 @@ class Categorical(Dimension):
 
         """
         self.transform_ = transform
-        if transform not in ["identity", "onehot", "string", "normalize", "label"]:
+        if transform not in ["identity", "onehot",
+                             "string", "normalize", "label"]:
             raise ValueError(
                 "Expected transform to be 'identity', 'string',"
                 "'label' or 'onehot' got {}".format(transform)
@@ -780,11 +792,12 @@ class Categorical(Dimension):
             self._rvs = _uniform_inclusive(0.0, 1.0)
         else:
             # XXX check that sum(prior) == 1
-            self._rvs = rv_discrete(values=(range(len(self.categories)), self.prior_))
+            self._rvs = rv_discrete(
+                values=(range(len(self.categories)), self.prior_))
 
     def __eq__(self, other):
         return (
-            type(self) is type(other)
+            isinstance(self, type(other))
             and self.categories == other.categories
             and np.allclose(self.prior_, other.prior_)
         )
@@ -926,7 +939,8 @@ class Space(object):
                     vals = list(x.choices)
                     if x.name in cond_hps:
                         vals.append("NA")
-                    param = Categorical(vals, prior=x.probabilities, name=x.name)
+                    param = Categorical(
+                        vals, prior=x.probabilities, name=x.name)
                     space.append(param)
                     self.hps_type[x.name] = "Categorical"
                 elif isinstance(x, CS.hyperparameters.OrdinalHyperparameter):
@@ -969,7 +983,8 @@ class Space(object):
                 elif isinstance(x, CS.hyperparameters.NormalFloatHyperparameter):
                     prior = "normal"
                     if x.log:
-                        raise ValueError("Unsupported 'log' transformation for NormalFloatHyperparameter.")
+                        raise ValueError(
+                            "Unsupported 'log' transformation for NormalFloatHyperparameter.")
                     param = Real(x.lower, x.upper, prior=prior, name=x.name,
                                  loc=x.mu, scale=x.sigma)
                     space.append(param)
@@ -996,7 +1011,8 @@ class Space(object):
                     if x.name in cond_hps:
                         vals.append("NA")
                     if isinstance(distrib, CCS.RouletteDistribution):
-                        param = Categorical(vals, prior=distrib.areas, name=x.name)
+                        param = Categorical(
+                            vals, prior=distrib.areas, name=x.name)
                     elif isinstance(distrib, CCS.UniformDistribution):
                         param = Categorical(vals, name=x.name)
                     else:
@@ -1014,7 +1030,8 @@ class Space(object):
                     elif isinstance(distrib, CCS.NormalDistribution):
                         prior = "normal"
                         if distrib.scale_type == CCS.ccs_scale_type.LOGARITHMIC:
-                            raise ValueError("Unsupported 'log' transformation for CCS.NumericalHyperparameter with normal prior.")
+                            raise ValueError(
+                                "Unsupported 'log' transformation for CCS.NumericalHyperparameter with normal prior.")
                     else:
                         raise ValueError("Unsupported distribution")
                     if CCS.ccs_numeric_type.NUM_INTEGER:
@@ -1099,7 +1116,10 @@ class Space(object):
         with open(yml_path, "rb") as f:
             config = yaml.safe_load(f)
 
-        dimension_classes = {"real": Real, "integer": Integer, "categorical": Categorical}
+        dimension_classes = {
+            "real": Real,
+            "integer": Integer,
+            "categorical": Categorical}
 
         # Extract space options for configuration file
         if isinstance(config, dict):
@@ -1138,7 +1158,6 @@ class Space(object):
                 val = conf[hp_name]
             point.append(val)
         return point
-
 
     def _ccs_post_process_conf(self, hps_names, conf):
         point = []
@@ -1318,7 +1337,8 @@ class Space(object):
             if offset == 1:
                 columns.append(dim.inverse_transform(Xt[:, start]))
             else:
-                columns.append(dim.inverse_transform(Xt[:, start : start + offset]))
+                columns.append(dim.inverse_transform(
+                    Xt[:, start: start + offset]))
 
             start += offset
 
