@@ -1010,7 +1010,7 @@ class Space(object):
                             raise ValueError("Unsupported 'log' transformation for CCS.NumericalParameter with normal prior.")
                     else:
                         raise ValueError("Unsupported distribution")
-                    if CCS.ccs_numeric_type.NUM_INTEGER:
+                    if CCS.ccs_numeric_type.INT:
                         param = Integer(lower, upper, prior=prior, name=x.name)
                         self.hps_type[x.name] = "Integer"
                     else:
