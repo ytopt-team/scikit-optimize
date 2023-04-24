@@ -1002,15 +1002,15 @@ class Space(object):
                     upper = x.upper
                     t = x.data_type
                     if isinstance(distrib, CCS.UniformDistribution):
-                        if distrib.scale_type == CCS.ccs_scale_type.LOGARITHMIC:
+                        if distrib.scale_type == CCS.ScaleType.LOGARITHMIC:
                             prior = "log-uniform"
                     elif isinstance(distrib, CCS.NormalDistribution):
                         prior = "normal"
-                        if distrib.scale_type == CCS.ccs_scale_type.LOGARITHMIC:
+                        if distrib.scale_type == CCS.ScaleType.LOGARITHMIC:
                             raise ValueError("Unsupported 'log' transformation for CCS.NumericalParameter with normal prior.")
                     else:
                         raise ValueError("Unsupported distribution")
-                    if CCS.ccs_numeric_type.INT:
+                    if CCS.NumericType.INT:
                         param = Integer(lower, upper, prior=prior, name=x.name)
                         self.hps_type[x.name] = "Integer"
                     else:
@@ -1138,7 +1138,7 @@ class Space(object):
         values = conf.values
         for i, hp_name in enumerate(hps_names):
             val = values[i]
-            if CCS.ccs_inactive == val:
+            if CCS.inactive == val:
                 if self.hps_type[hp_name] == "Categorical":
                     val = "NA"
                 else:
