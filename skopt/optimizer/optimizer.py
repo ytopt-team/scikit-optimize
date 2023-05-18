@@ -506,7 +506,7 @@ class Optimizer(object):
             if hasattr(self, "config_space"):
                 hps_names = self.config_space.get_hyperparameter_names()
             elif hasattr(self, "ccs"):
-                hps_names = [x.name for x in self.ccs.hyperparameters]
+                hps_names = [x.name for x in self.ccs.parameters]
             else:
                 hps_names = self.space.dimension_names
 

@@ -975,16 +975,16 @@ class Space(object):
             self.ccs = dimensions
             self.hps_type = {}
 
-            hps = self.ccs.hyperparameters
-            cond_hps = [x.name for x in self.ccs.conditional_hyperparameters]
+            hps = self.ccs.parameters
+            cond_hps = [x.name for x in self.ccs.conditional_parameters]
 
             space = []
             for x in hps:
                 self.hps_names.append(x.name)
-                distrib = self.ccs.get_hyperparameter_distribution(x)[0]
-                if (isinstance(x, CCS.CategoricalHyperparameter) or
-                        isinstance(x, CCS.OrdinalHyperparameter) or
-                        isinstance(x, CCS.DiscreteHyperparameter)):
+                distrib = self.ccs.get_parameter_distribution(x)[0]
+                if (isinstance(x, CCS.CategoricalParameter) or
+                        isinstance(x, CCS.OrdinalParameter) or
+                        isinstance(x, CCS.DiscreteParameter)):
                     vals = list(x.values)
                     if x.name in cond_hps:
                         vals.append("NA")
@@ -996,21 +996,21 @@ class Space(object):
                         raise ValueError("Unsupported distribution")
                     space.append(param)
                     self.hps_type[x.name] = "Categorical"
-                elif isinstance(x, CCS.NumericalHyperparameter):
+                elif isinstance(x, CCS.NumericalParameter):
                     prior = "uniform"
                     lower = x.lower
                     upper = x.upper
                     t = x.data_type
                     if isinstance(distrib, CCS.UniformDistribution):
-                        if distrib.scale_type == CCS.ccs_scale_type.LOGARITHMIC:
+                        if distrib.scale_type == CCS.ScaleType.LOGARITHMIC:
                             prior = "log-uniform"
                     elif isinstance(distrib, CCS.NormalDistribution):
                         prior = "normal"
-                        if distrib.scale_type == CCS.ccs_scale_type.LOGARITHMIC:
-                            raise ValueError("Unsupported 'log' transformation for CCS.NumericalHyperparameter with normal prior.")
+                        if distrib.scale_type == CCS.ScaleType.LOGARITHMIC:
+                            raise ValueError("Unsupported 'log' transformation for CCS.NumericalParameter with normal prior.")
                     else:
                         raise ValueError("Unsupported distribution")
-                    if CCS.ccs_numeric_type.NUM_INTEGER:
+                    if CCS.NumericType.INT:
                         param = Integer(lower, upper, prior=prior, name=x.name)
                         self.hps_type[x.name] = "Integer"
                     else:
@@ -1018,7 +1018,7 @@ class Space(object):
                         self.hps_type[x.name] = "Real"
                     space.append(param)
                 else:
-                    raise ValueError("Unknown Hyperparameter type")
+                    raise ValueError("Unknown Parameter type")
             dimensions = space
         self.dimensions = [check_dimension(dim) for dim in dimensions]
 
@@ -1138,7 +1138,7 @@ class Space(object):
         values = conf.values
         for i, hp_name in enumerate(hps_names):
             val = values[i]
-            if CCS.ccs_inactive == val:
+            if CCS.inactive == val:
                 if self.hps_type[hp_name] == "Categorical":
                     val = "NA"
                 else:
@@ -1153,7 +1153,7 @@ class Space(object):
             return self._cs_post_process_conf(hps_names, conf)
         elif self.is_ccs:
             conf = self.ccs.default_configuration
-            hps_names = [x.name for x in self.ccs.hyperparameters]
+            hps_names = [x.name for x in self.ccs.parameters]
             return self._ccs_post_process_conf(hps_names, conf)
         else:
             return None
@@ -1192,7 +1192,7 @@ class Space(object):
         elif self.is_ccs:
             points = []
             confs = self.ccs.samples(n_samples)
-            hps_names = [x.name for x in self.ccs.hyperparameters]
+            hps_names = [x.name for x in self.ccs.parameters]
             for conf in confs:
                 point = self._ccs_post_process_conf(hps_names, conf)
                 points.append(point)
