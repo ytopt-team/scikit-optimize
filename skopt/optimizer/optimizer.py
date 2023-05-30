@@ -516,7 +516,8 @@ class Optimizer(object):
             if len(self.sampled) > 0:
                 df_history = pd.DataFrame(data=self.sampled, columns=hps_names)
                 df_merge = pd.merge(df_samples, df_history, on=None, how="inner")
-                df_samples = df_samples.append(df_merge)
+                #df_samples = df_samples.append(df_merge)
+                df_samples = pd.concat([df_samples, df_merge])
                 df_samples = df_samples[~df_samples.duplicated(keep=False)]
 
             if  len(df_samples) > 0:
